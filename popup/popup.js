@@ -1,13 +1,15 @@
 /**
  * Rich Web Sticky Notes - Popup Controller
+ * Global Availability: Manages sticky notes available across all websites.
  */
+
+const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const pageUrlEl = document.getElementById('pageUrl');
   const badgeCountEl = document.getElementById('notesCountBadge');
   const notesListEl = document.getElementById('notesList');
   const btnNewNote = document.getElementById('btnNewNote');
-  const btnNewNoteText = document.getElementById('btnNewNoteText');
   const btnOpenCanvasTop = document.getElementById('btnOpenCanvasTop');
   const btnToggleVisibility = document.getElementById('btnToggleVisibility');
   const btnExport = document.getElementById('btnExport');
@@ -16,10 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const searchClear = document.getElementById('searchClear');
   const newKeyHint = document.getElementById('newKeyHint');
   const toggleKeyHint = document.getElementById('toggleKeyHint');
-  const restrictedBanner = document.getElementById('restrictedBanner');
-  const btnLaunchCanvas = document.getElementById('btnLaunchCanvas');
 
-  // Platform specific shortcuts display
   const isMac = navigator.userAgent.toLowerCase().includes('mac');
   if (isMac) {
     if (newKeyHint) newKeyHint.textContent = 'Cmd+Shift+N';
@@ -28,81 +27,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let activeTab = null;
   let allNotes = [];
+  let isWebPage = false;
   let isNotesVisible = true;
-  let isRestrictedPage = false;
-  let currentStorageKey = null;
 
-  // Normalized Storage Key helper
-  function computeStorageKey(url) {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
-        return 'notes:canvas_workspace';
-      }
-      if (parsed.protocol === 'about:' || url === 'about:blank') {
-        return 'notes:about_blank';
-      }
-      if (parsed.protocol === 'file:') {
-        return `notes:file_${parsed.pathname}`;
-      }
-      if (['http:', 'https:'].includes(parsed.protocol)) {
-        return `notes:${parsed.origin}${parsed.pathname}`;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  // 1. Detect Active Tab
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     activeTab = tab;
-  } catch (err) {
-    console.error('Cannot query active tab:', err);
-  }
-
-  if (!activeTab || !activeTab.id || !activeTab.url) {
-    setupRestrictedMode('No active tab detected');
-    return;
-  }
-
-  currentStorageKey = computeStorageKey(activeTab.url);
-
-  // If on browser internal page (like chrome://newtab), switch to Canvas Companion Mode
-  if (!currentStorageKey) {
-    setupRestrictedMode('Chrome New Tab / Internal Page');
-  } else {
-    // Normal Web, Localhost, File, or Canvas Page
-    try {
-      const parsed = new URL(activeTab.url);
-      if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
-        pageUrlEl.textContent = 'Notes Canvas';
-      } else if (parsed.protocol === 'about:') {
-        pageUrlEl.textContent = 'about:blank';
-      } else {
-        pageUrlEl.textContent = `${parsed.hostname || ''}${parsed.pathname}`;
-      }
-      pageUrlEl.title = activeTab.url;
-    } catch {
-      pageUrlEl.textContent = activeTab.url;
+    if (activeTab && activeTab.url) {
+      const u = activeTab.url;
+      isWebPage = (
+        !u.startsWith('chrome://') &&
+        !u.startsWith('edge://') &&
+        !u.startsWith('chrome-extension://')
+      ) || u.includes('canvas');
     }
-    loadNotes();
+  } catch (err) {
+    console.debug('Active tab query:', err);
   }
 
-  function setupRestrictedMode(title) {
-    isRestrictedPage = true;
-    currentStorageKey = 'notes:canvas_workspace';
-    pageUrlEl.textContent = title;
-    restrictedBanner.style.display = 'flex';
-    if (btnNewNoteText) btnNewNoteText.textContent = 'New Note (Canvas)';
-    btnToggleVisibility.disabled = true;
-    loadNotesFromStorageDirectly();
-  }
-
-  // Tab messenger with auto-injection
+  // Safe tab messenger
   async function sendMessageToContent(message) {
-    if (isRestrictedPage) return null;
+    if (!isWebPage || !activeTab || !activeTab.id) return null;
     try {
       return await chrome.tabs.sendMessage(activeTab.id, message);
     } catch (err) {
@@ -114,8 +59,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         await new Promise(r => setTimeout(r, 120));
         return await chrome.tabs.sendMessage(activeTab.id, message);
       } catch (injErr) {
-        throw injErr;
+        return null;
       }
+    }
+  }
+
+  // Load and migrate legacy per-URL notes into global store
+  async function loadGlobalNotes() {
+    try {
+      const allData = await chrome.storage.local.get(null);
+      let globalList = Array.isArray(allData[GLOBAL_STORAGE_KEY]) ? allData[GLOBAL_STORAGE_KEY] : [];
+
+      // Check legacy keys
+      const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== GLOBAL_STORAGE_KEY);
+      if (legacyKeys.length > 0) {
+        const existingIds = new Set(globalList.map(n => n.id));
+        let migrated = false;
+        for (const key of legacyKeys) {
+          const list = allData[key];
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              if (item && item.id && !existingIds.has(item.id)) {
+                globalList.push(item);
+                existingIds.add(item.id);
+                migrated = true;
+              }
+            }
+          }
+        }
+        if (migrated) {
+          await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: globalList });
+          await chrome.storage.local.remove(legacyKeys).catch(() => {});
+        }
+      }
+
+      allNotes = globalList;
+      renderNotes(getFilteredNotes());
+    } catch (e) {
+      allNotes = [];
+      renderNotes([]);
     }
   }
 
@@ -139,33 +121,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${days}d ago`;
   }
 
-  async function loadNotes() {
-    try {
-      const response = await sendMessageToContent({ action: 'GET_NOTES' });
-      if (response && response.ok) {
-        allNotes = response.notes || [];
-        isNotesVisible = response.isVisible !== false;
-        updateVisibilityIcon();
-        renderNotes(getFilteredNotes());
-      } else {
-        await loadNotesFromStorageDirectly();
-      }
-    } catch (err) {
-      await loadNotesFromStorageDirectly();
-    }
-  }
-
-  async function loadNotesFromStorageDirectly() {
-    try {
-      if (!currentStorageKey) return;
-      const data = await chrome.storage.local.get(currentStorageKey);
-      allNotes = Array.isArray(data[currentStorageKey]) ? data[currentStorageKey] : [];
-      renderNotes(getFilteredNotes());
-    } catch (e) {
-      renderNotes([]);
-    }
-  }
-
   function getFilteredNotes() {
     const query = searchInput.value.trim().toLowerCase();
     if (!query) return allNotes;
@@ -175,29 +130,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const bodyMatch = text.includes(query);
       return headingMatch || bodyMatch;
     });
-  }
-
-  function updateVisibilityIcon() {
-    if (!btnToggleVisibility) return;
-    if (isNotesVisible) {
-      btnToggleVisibility.classList.remove('is-active');
-      btnToggleVisibility.title = 'Hide sticky notes on this page';
-      btnToggleVisibility.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-          <circle cx="12" cy="12" r="3"></circle>
-        </svg>
-      `;
-    } else {
-      btnToggleVisibility.classList.add('is-active');
-      btnToggleVisibility.title = 'Show sticky notes on this page';
-      btnToggleVisibility.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-          <line x1="1" y1="1" x2="23" y2="23"></line>
-        </svg>
-      `;
-    }
   }
 
   function renderNotes(notes) {
@@ -215,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             <polyline points="10 9 9 9 8 9"></polyline>
           </svg>
           <div class="empty-title">No Sticky Notes Found</div>
-          <div class="empty-desc">${isRestrictedPage ? 'Click "New Note (Canvas)" to create a note on the Blank Notes Canvas.' : 'Click "New Note" above or press Alt+Shift+N to create a sticky note.'}</div>
+          <div class="empty-desc">Click "New Note" or press Alt+Shift+N to create a sticky note. Your notes follow you everywhere across all sites!</div>
         </div>
       `;
       return;
@@ -263,12 +195,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
 
-      // Click card to jump/reopen
+      // Click card to jump or reopen
       card.addEventListener('click', async (e) => {
         if (e.target.closest('.btn-card-delete')) return;
 
-        if (isRestrictedPage) {
-          // Open canvas tab with note
+        if (!isWebPage) {
           const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
           await chrome.tabs.create({ url: canvasUrl });
           window.close();
@@ -283,7 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
           window.close();
         } catch (err) {
-          console.error('Focus note failed:', err);
+          console.debug('Focus note failed:', err);
         }
       });
 
@@ -294,18 +225,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const confirmDelete = window.confirm('Permanently delete this sticky note?');
         if (!confirmDelete) return;
 
-        try {
-          if (!isRestrictedPage) {
-            await sendMessageToContent({ action: 'DELETE_NOTE', noteId: note.id });
-          } else {
-            allNotes = allNotes.filter(n => n.id !== note.id);
-            await chrome.storage.local.set({ [currentStorageKey]: allNotes });
-          }
-          allNotes = allNotes.filter(n => n.id !== note.id);
-          renderNotes(getFilteredNotes());
-        } catch (err) {
-          console.error('Delete note failed:', err);
+        allNotes = allNotes.filter(n => n.id !== note.id);
+        await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: allNotes });
+
+        if (isWebPage) {
+          sendMessageToContent({ action: 'DELETE_NOTE', noteId: note.id }).catch(() => {});
         }
+
+        renderNotes(getFilteredNotes());
       });
 
       notesListEl.appendChild(card);
@@ -328,66 +255,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.close();
   }
 
-  // --- Button Handlers ---
+  // --- Actions ---
 
   // New Note
   btnNewNote.addEventListener('click', async () => {
-    if (isRestrictedPage) {
+    if (!isWebPage) {
       openCanvasTab();
       return;
     }
 
     try {
       btnNewNote.disabled = true;
-      await sendMessageToContent({ action: 'CREATE_NOTE' });
-      window.close();
+      const resp = await sendMessageToContent({ action: 'CREATE_NOTE' });
+      if (resp && resp.ok) {
+        window.close();
+      } else {
+        openCanvasTab();
+      }
     } catch (err) {
-      // If content injection failed, open canvas
       openCanvasTab();
     }
   });
 
-  // Top Bar Open Canvas Button
+  // Open Canvas
   btnOpenCanvasTop.addEventListener('click', () => {
     openCanvasTab();
   });
 
-  // Banner Launch Canvas Button
-  if (btnLaunchCanvas) {
-    btnLaunchCanvas.addEventListener('click', () => {
-      openCanvasTab();
-    });
-  }
-
   // Toggle Visibility
   btnToggleVisibility.addEventListener('click', async () => {
+    if (!isWebPage) return;
     try {
       const resp = await sendMessageToContent({ action: 'TOGGLE_VISIBILITY' });
       if (resp && typeof resp.isVisible === 'boolean') {
         isNotesVisible = resp.isVisible;
-        updateVisibilityIcon();
+        if (isNotesVisible) {
+          btnToggleVisibility.classList.remove('is-active');
+        } else {
+          btnToggleVisibility.classList.add('is-active');
+        }
       }
     } catch (err) {}
   });
 
-  // Export Notes (Markdown file download)
+  // Export Notes to Markdown
   btnExport.addEventListener('click', () => {
     if (allNotes.length === 0) {
-      alert('No notes to export.');
+      alert('No sticky notes to export.');
       return;
     }
 
-    let md = `# Sticky Notes Export\n`;
-    md += `URL: ${activeTab?.url || 'Notes Canvas'}\n`;
-    md += `Exported: ${new Date().toLocaleString()}\n\n---\n\n`;
+    let md = `# Global Sticky Notes Export\n`;
+    md += `Exported: ${new Date().toLocaleString()}\n`;
+    md += `Total Notes: ${allNotes.length}\n\n---\n\n`;
 
     allNotes.forEach((n, idx) => {
       const title = n.heading ? n.heading.trim() : `Note #${idx + 1}`;
       const text = htmlToPlainText(n.bodyHtml).trim();
       const updated = new Date(n.updatedAt || Date.now()).toLocaleString();
-      const status = n.closed ? ' [Closed]' : '';
+      const status = n.closed ? ' [Closed]' : ' [Active]';
+      const source = n.sourceUrl ? ` | Origin: ${n.sourceUrl}` : '';
+
       md += `### ${title}${status}\n`;
-      md += `*Theme: ${n.color || 'Yellow'} | Last Updated: ${updated}*\n\n`;
+      md += `*Theme: ${n.color || 'Yellow'} | Last Updated: ${updated}${source}*\n\n`;
       md += `${text || '_No content_'}\n\n---\n\n`;
     });
 
@@ -395,7 +325,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sticky-notes-${Date.now()}.md`;
+    a.download = `global-sticky-notes-${Date.now()}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -405,23 +335,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Clear All Notes
   btnClearAll.addEventListener('click', async () => {
     if (allNotes.length === 0) return;
-    const confirmClear = window.confirm(`Permanently delete all ${allNotes.length} notes?`);
+    const confirmClear = window.confirm(`Permanently delete all ${allNotes.length} sticky notes everywhere?`);
     if (!confirmClear) return;
 
-    try {
-      if (!isRestrictedPage) {
-        await sendMessageToContent({ action: 'DELETE_ALL_NOTES' });
-      } else {
-        await chrome.storage.local.set({ [currentStorageKey]: [] });
-      }
-      allNotes = [];
-      renderNotes([]);
-    } catch (err) {
-      console.error('Clear all notes failed:', err);
+    allNotes = [];
+    await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: [] });
+
+    if (isWebPage) {
+      sendMessageToContent({ action: 'DELETE_ALL_NOTES' }).catch(() => {});
     }
+
+    renderNotes([]);
   });
 
-  // Search input events
+  // Search
   searchInput.addEventListener('input', () => {
     if (searchInput.value.trim().length > 0) {
       searchClear.classList.add('visible');
@@ -437,4 +364,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderNotes(allNotes);
     searchInput.focus();
   });
+
+  // Real-time updates while popup is open
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes[GLOBAL_STORAGE_KEY]) {
+      allNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
+      renderNotes(getFilteredNotes());
+    }
+  });
+
+  // Initialize
+  loadGlobalNotes();
 });

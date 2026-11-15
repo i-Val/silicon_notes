@@ -1,63 +1,24 @@
 /**
  * Rich Web Sticky Notes - Background Service Worker (Manifest V3)
+ * Global Availability: Tracks notes globally across the browser.
  */
 
-function getNormalizedUrlKey(url) {
-  if (!url) return null;
+const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+
+async function updateBadgeGlobal() {
   try {
-    const parsed = new URL(url);
-
-    // Canvas extension page
-    if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
-      return 'notes:canvas_workspace';
-    }
-
-    // about:blank
-    if (parsed.protocol === 'about:' || url === 'about:blank') {
-      return 'notes:about_blank';
-    }
-
-    // file:// (parsed.origin is "null" in Chromium)
-    if (parsed.protocol === 'file:') {
-      return `notes:file_${parsed.pathname}`;
-    }
-
-    // Web and localhost
-    if (['http:', 'https:'].includes(parsed.protocol)) {
-      return `notes:${parsed.origin}${parsed.pathname}`;
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function updateTabBadge(tabId, url) {
-  if (!tabId || tabId < 0) return;
-  const key = getNormalizedUrlKey(url);
-  if (!key) {
-    chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
-    return;
-  }
-
-  try {
-    const data = await chrome.storage.local.get(key);
-    const notes = Array.isArray(data[key]) ? data[key] : [];
-    // Count only active (unclosed) notes
+    const data = await chrome.storage.local.get(GLOBAL_STORAGE_KEY);
+    const notes = Array.isArray(data[GLOBAL_STORAGE_KEY]) ? data[GLOBAL_STORAGE_KEY] : [];
     const activeCount = notes.filter(n => !n.closed).length;
 
     await chrome.action.setBadgeText({
-      tabId,
       text: activeCount > 0 ? String(activeCount) : ''
     });
     await chrome.action.setBadgeBackgroundColor({
-      tabId,
       color: '#eab308'
     });
     if (chrome.action.setBadgeTextColor) {
       await chrome.action.setBadgeTextColor({
-        tabId,
         color: '#18181b'
       });
     }
@@ -66,7 +27,7 @@ async function updateTabBadge(tabId, url) {
   }
 }
 
-// Send a message to content script, auto-injecting if needed
+// Send message to content script, auto-injecting if needed
 async function sendMessageToTab(tabId, message) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
@@ -90,53 +51,45 @@ chrome.commands.onCommand.addListener(async (command) => {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!activeTab || !activeTab.id || !activeTab.url) return;
 
-  const key = getNormalizedUrlKey(activeTab.url);
-
-  // If on a browser-internal page (like chrome://newtab), open the canvas workspace
-  if (!key) {
-    if (command === 'new-sticky-note') {
-      const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
-      chrome.tabs.create({ url: canvasUrl });
-    }
-    return;
-  }
+  const isRestricted = (
+    activeTab.url.startsWith('chrome://') ||
+    activeTab.url.startsWith('edge://') ||
+    activeTab.url.startsWith('chrome-extension://')
+  );
 
   if (command === 'new-sticky-note') {
-    sendMessageToTab(activeTab.id, { action: 'CREATE_NOTE' }).catch(() => {});
+    if (isRestricted && !activeTab.url.includes('canvas')) {
+      const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
+      chrome.tabs.create({ url: canvasUrl });
+    } else {
+      sendMessageToTab(activeTab.id, { action: 'CREATE_NOTE' }).catch(() => {});
+    }
   } else if (command === 'toggle-notes-visibility') {
-    sendMessageToTab(activeTab.id, { action: 'TOGGLE_VISIBILITY' }).catch(() => {});
+    if (!isRestricted) {
+      sendMessageToTab(activeTab.id, { action: 'TOGGLE_VISIBILITY' }).catch(() => {});
+    }
   }
 });
 
 // Update badge on tab navigation
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    updateTabBadge(tabId, tab.url);
+  if (changeInfo.status === 'complete') {
+    updateBadgeGlobal();
   }
 });
 
 // Update badge on tab activation
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  try {
-    const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab && tab.url) {
-      updateTabBadge(activeInfo.tabId, tab.url);
-    }
-  } catch (err) {}
+chrome.tabs.onActivated.addListener(() => {
+  updateBadgeGlobal();
 });
 
 // Real-time badge update on storage change
-chrome.storage.onChanged.addListener(async (changes, areaName) => {
+chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!activeTab || !activeTab.id || !activeTab.url) return;
-
-  const currentKey = getNormalizedUrlKey(activeTab.url);
-  if (currentKey && changes[currentKey]) {
-    const newNotes = changes[currentKey].newValue || [];
+  if (changes[GLOBAL_STORAGE_KEY]) {
+    const newNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
     const activeCount = Array.isArray(newNotes) ? newNotes.filter(n => !n.closed).length : 0;
     chrome.action.setBadgeText({
-      tabId: activeTab.id,
       text: activeCount > 0 ? String(activeCount) : ''
     }).catch(() => {});
   }
@@ -145,15 +98,11 @@ chrome.storage.onChanged.addListener(async (changes, areaName) => {
 // Messages from popup or content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'UPDATE_BADGE_COUNT') {
-    const tabId = sender?.tab?.id || message.tabId;
-    if (tabId) {
-      const count = message.count || 0;
-      chrome.action.setBadgeText({
-        tabId,
-        text: count > 0 ? String(count) : ''
-      }).catch(() => {});
-    }
+    updateBadgeGlobal();
     sendResponse({ ok: true });
   }
   return true;
 });
+
+// Initial badge update on service worker start
+updateBadgeGlobal();

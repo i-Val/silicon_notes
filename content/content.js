@@ -1,6 +1,7 @@
 /**
  * Rich Web Sticky Notes - Content Script
  * Manifest V3, Modern ES2022+, Shadow DOM Isolation, Zero External Dependencies
+ * Global Availability: Notes persist globally across all websites, localhost, and canvas.
  */
 
 (() => {
@@ -11,6 +12,8 @@
   window.__RICH_WEB_STICKY_NOTES_INITIALIZED__ = true;
 
   // --- Constants & Color Themes ---
+  const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+
   const THEMES = {
     yellow: {
       id: 'yellow',
@@ -57,29 +60,6 @@
   const THEME_KEYS = Object.keys(THEMES);
   const DEFAULT_THEME_COLOR = THEMES.yellow.bg;
 
-  // Unified Storage Key Normalization
-  function getPageStorageKey() {
-    try {
-      const loc = window.location;
-      // Handle extension Canvas Workspace
-      if (loc.protocol === 'chrome-extension:' && loc.pathname.includes('canvas')) {
-        return 'notes:canvas_workspace';
-      }
-      // Handle about:blank
-      if (loc.protocol === 'about:' || loc.href === 'about:blank') {
-        return 'notes:about_blank';
-      }
-      // Handle file:// (in Chrome loc.origin is "null" for file:)
-      if (loc.protocol === 'file:') {
-        return `notes:file_${loc.pathname}`;
-      }
-      // Handle localhost and normal web pages
-      return `notes:${loc.origin}${loc.pathname}`;
-    } catch {
-      return `notes:${window.location.href}`;
-    }
-  }
-
   // UUID v4 generator
   function generateUUID() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -115,7 +95,6 @@
           }
           if (ALLOWED_TAGS.has(tagName)) {
             const cleanEl = document.createElement(tagName.toLowerCase());
-            // Intentionally copy ZERO attributes (strips onclick, style, class, etc.)
             for (const child of Array.from(node.childNodes)) {
               const cleanedChild = cleanNode(child);
               if (cleanedChild) cleanEl.appendChild(cleanedChild);
@@ -140,12 +119,10 @@
       }
       return container.innerHTML;
     } catch (e) {
-      console.warn('Sanitization fallback:', e);
       return '';
     }
   }
 
-  // Find theme by color string or id
   function getThemeByColor(color) {
     if (!color) return THEMES.yellow;
     for (const key of THEME_KEYS) {
@@ -581,43 +558,38 @@
   // --- Sticky Note Manager ---
   class StickyNotesApp {
     constructor() {
-      this.notesMap = new Map(); // id -> NoteData (all notes on this page, including closed)
-      this.controllers = new Map(); // id -> NoteController (active DOM controllers on page)
+      this.notesMap = new Map(); // id -> NoteData (all global notes, including closed)
+      this.controllers = new Map(); // id -> NoteController (active DOM controllers on this page)
       this.highestZIndex = 2147483641;
-      this.storageKey = getPageStorageKey();
+      this.storageKey = GLOBAL_STORAGE_KEY;
       this.container = null;
       this.shadowRoot = null;
       this.saveDebounceTimer = null;
       this.isVisible = true;
 
       this.initHost();
-      this.loadNotes();
+      this.loadNotesWithMigration();
       this.setupListeners();
     }
 
     initHost() {
-      // Remove any existing host if reloaded
       const existing = document.getElementById('rich-web-sticky-notes-root');
       if (existing) existing.remove();
 
       const host = document.createElement('div');
       host.id = 'rich-web-sticky-notes-root';
-      // Inline styles with !important guarantee host page styles (like Tailwind resets) NEVER hide or misplace it
       host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; pointer-events: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important;';
 
       this.shadowRoot = host.attachShadow({ mode: 'open' });
 
-      // Inject Isolated Styles
       const styleEl = document.createElement('style');
       styleEl.textContent = SHADOW_STYLES;
       this.shadowRoot.appendChild(styleEl);
 
-      // Main container
       this.container = document.createElement('div');
       this.container.className = 'sticky-notes-container';
       this.shadowRoot.appendChild(this.container);
 
-      // Append host to DOM safely
       const target = document.body || document.documentElement;
       if (target) {
         target.appendChild(host);
@@ -628,29 +600,53 @@
       }
     }
 
-    async loadNotes() {
+    // Loads notes globally, automatically migrating any previous per-URL notes
+    async loadNotesWithMigration() {
       try {
-        const data = await chrome.storage.local.get(this.storageKey);
-        const storedList = Array.isArray(data[this.storageKey]) ? data[this.storageKey] : [];
+        const allData = await chrome.storage.local.get(null);
+        let globalList = Array.isArray(allData[this.storageKey]) ? allData[this.storageKey] : [];
 
-        // Clear existing controllers and data
+        // Check if there are legacy per-URL keys (keys starting with 'notes:')
+        const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== this.storageKey);
+        if (legacyKeys.length > 0) {
+          const existingIds = new Set(globalList.map(n => n.id));
+          let migrated = false;
+          for (const key of legacyKeys) {
+            const list = allData[key];
+            if (Array.isArray(list)) {
+              for (const item of list) {
+                if (item && item.id && !existingIds.has(item.id)) {
+                  globalList.push(item);
+                  existingIds.add(item.id);
+                  migrated = true;
+                }
+              }
+            }
+          }
+          if (migrated) {
+            await chrome.storage.local.set({ [this.storageKey]: globalList });
+            await chrome.storage.local.remove(legacyKeys).catch(() => {});
+          }
+        }
+
+        // Populate in-memory map and render active notes
         this.container.innerHTML = '';
         this.controllers.clear();
         this.notesMap.clear();
 
-        for (const item of storedList) {
+        for (const item of globalList) {
           this.notesMap.set(item.id, item);
-          // Only render controller on page if not marked closed
           if (!item.closed) {
             const controller = new NoteController(this, item);
             this.controllers.set(item.id, controller);
             this.container.appendChild(controller.element);
+            controller.clampToViewport();
           }
         }
 
         this.notifyBadgeUpdate();
       } catch (err) {
-        console.error('Error loading sticky notes:', err);
+        console.error('Error loading global sticky notes:', err);
       }
     }
 
@@ -660,8 +656,10 @@
 
       const defaultWidth = 260;
       const defaultHeight = 240;
-      const maxX = Math.max(20, (window.innerWidth || 800) - defaultWidth - 40);
-      const maxY = Math.max(20, (window.innerHeight || 600) - defaultHeight - 40);
+      const w = window.innerWidth || 800;
+      const h = window.innerHeight || 600;
+      const maxX = Math.max(20, w - defaultWidth - 40);
+      const maxY = Math.max(20, h - defaultHeight - 40);
 
       const targetX = Math.min(Math.max(30, 60 + baseOffset), maxX);
       const targetY = Math.min(Math.max(30, 80 + baseOffset), maxY);
@@ -677,6 +675,8 @@
         height: overrides.height ?? defaultHeight,
         collapsed: overrides.collapsed ?? false,
         closed: false,
+        sourceUrl: window.location.href,
+        sourceTitle: document.title || 'Web Note',
         updatedAt: Date.now()
       };
 
@@ -693,13 +693,12 @@
       return controller;
     }
 
-    // Close note: stashes it from the page, but PRESERVES IT in storage and in popup list!
+    // Close note: stashes it off-screen, but keeps it permanently saved
     closeNote(id) {
       const controller = this.controllers.get(id);
       const data = this.notesMap.get(id);
       if (!data) return;
 
-      // Update data state
       data.closed = true;
       data.updatedAt = Date.now();
       if (controller) {
@@ -745,7 +744,6 @@
       this.bringToFront(controller);
       controller.clampToViewport();
 
-      // Trigger pulse highlight
       controller.element.classList.remove('highlight-pulse');
       void controller.element.offsetWidth;
       controller.element.classList.add('highlight-pulse');
@@ -789,30 +787,27 @@
       }, 250);
     }
 
-    // Save immediately and synchronously to ensure zero loss
     persistNow() {
       clearTimeout(this.saveDebounceTimer);
-      // Synchronize latest data from active controllers into notesMap
       for (const [id, controller] of this.controllers.entries()) {
         if (this.notesMap.has(id)) {
-          const fresh = controller.getData();
-          this.notesMap.set(id, fresh);
+          this.notesMap.set(id, controller.getData());
         }
       }
 
       const list = Array.from(this.notesMap.values());
       chrome.storage.local.set({ [this.storageKey]: list }).catch(err => {
-        console.error('Failed to persist sticky notes:', err);
+        console.error('Failed to persist global sticky notes:', err);
       });
       this.notifyBadgeUpdate();
     }
 
     notifyBadgeUpdate() {
       try {
-        const openNotesCount = Array.from(this.notesMap.values()).filter(n => !n.closed).length;
+        const activeCount = Array.from(this.notesMap.values()).filter(n => !n.closed).length;
         chrome.runtime.sendMessage({
           action: 'UPDATE_BADGE_COUNT',
-          count: openNotesCount
+          count: activeCount
         }).catch(() => {});
       } catch (e) {}
     }
@@ -831,7 +826,6 @@
       let data = this.notesMap.get(id);
       if (!data) return false;
 
-      // If closed, reopen it
       if (data.closed || !this.controllers.has(id)) {
         return this.reopenNote(id);
       }
@@ -853,13 +847,11 @@
     }
 
     setupListeners() {
-      // Runtime message handler (from popup, background, or canvas)
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'CREATE_NOTE') {
           const note = this.createNote(message.noteData || {});
           sendResponse({ ok: true, noteId: note.data.id });
         } else if (message.action === 'GET_NOTES') {
-          // Flush active controller inputs
           for (const [id, controller] of this.controllers.entries()) {
             if (this.notesMap.has(id)) {
               this.notesMap.set(id, controller.getData());
@@ -891,14 +883,13 @@
         return true;
       });
 
-      // Canvas internal message listener
       window.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'CANVAS_CREATE_NOTE') {
           this.createNote();
         }
       });
 
-      // Multi-tab storage sync
+      // Real-time global sync across all browser tabs
       chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== 'local') return;
         if (changes[this.storageKey]) {
@@ -907,45 +898,21 @@
         }
       });
 
-      // Viewport resize clamping
       window.addEventListener('resize', () => {
         for (const controller of this.controllers.values()) {
           controller.clampToViewport();
         }
       });
 
-      // Immediate save on page unload or visibility hide to guarantee zero data loss
       window.addEventListener('beforeunload', () => this.persistNow());
       window.addEventListener('pagehide', () => this.persistNow());
-
-      // Handle SPA route changes
-      window.addEventListener('popstate', () => this.checkUrlChange());
-      const originalPushState = history.pushState;
-      history.pushState = (...args) => {
-        originalPushState.apply(history, args);
-        this.checkUrlChange();
-      };
-      const originalReplaceState = history.replaceState;
-      history.replaceState = (...args) => {
-        originalReplaceState.apply(history, args);
-        this.checkUrlChange();
-      };
-    }
-
-    checkUrlChange() {
-      const currentKey = getPageStorageKey();
-      if (currentKey !== this.storageKey) {
-        this.persistNow();
-        this.storageKey = currentKey;
-        this.loadNotes();
-      }
     }
 
     reconcileStorageChange(newList) {
       const newMap = new Map(newList.map(n => [n.id, n]));
       this.notesMap = newMap;
 
-      // Remove deleted notes or closed notes from DOM
+      // Remove deleted notes or closed notes from this page
       for (const [id, controller] of this.controllers.entries()) {
         const updated = newMap.get(id);
         if (!updated || updated.closed) {
@@ -970,6 +937,7 @@
           const controller = new NoteController(this, item);
           this.controllers.set(item.id, controller);
           this.container.appendChild(controller.element);
+          controller.clampToViewport();
         }
       }
 
@@ -992,6 +960,8 @@
         height: Math.max(200, data.height ?? 240),
         collapsed: !!data.collapsed,
         closed: !!data.closed,
+        sourceUrl: data.sourceUrl || '',
+        sourceTitle: data.sourceTitle || '',
         updatedAt: data.updatedAt || Date.now()
       };
 
@@ -1022,6 +992,8 @@
         height: Math.round(this.data.height),
         collapsed: this.data.collapsed,
         closed: this.data.closed,
+        sourceUrl: this.data.sourceUrl,
+        sourceTitle: this.data.sourceTitle,
         updatedAt: this.data.updatedAt
       };
     }
@@ -1060,7 +1032,6 @@
     }
 
     render() {
-      // Root Note Element
       this.element = document.createElement('div');
       this.element.className = 'sticky-note';
       this.element.dataset.id = this.data.id;
@@ -1109,7 +1080,7 @@
         <button class="btn-tool" data-cmd="code" title="Inline Code">${ICONS.code}</button>
       `;
 
-      // 4. Rich Text Body Area (contenteditable)
+      // 4. Rich Text Body Area
       this.bodyEl = document.createElement('div');
       this.bodyEl.className = 'note-body';
       this.bodyEl.contentEditable = 'true';
@@ -1122,7 +1093,6 @@
       this.resizerEl.title = 'Resize note';
       this.resizerEl.innerHTML = ICONS.resize;
 
-      // Assemble note
       this.element.appendChild(this.headerEl);
       this.element.appendChild(headingWrapper);
       this.element.appendChild(this.toolbarEl);
@@ -1255,41 +1225,33 @@
         this.app.bringToFront(this);
       });
 
-      // Palette trigger
       const paletteBtn = this.headerEl.querySelector('.btn-palette');
       paletteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.showPalettePopover();
       });
 
-      // Collapse trigger
       const collapseBtn = this.headerEl.querySelector('.btn-collapse');
       collapseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleCollapse();
       });
 
-      // Close trigger (stashes note, leaves persisted)
       const closeBtn = this.headerEl.querySelector('.btn-close');
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.app.closeNote(this.data.id);
       });
 
-      // Delete trigger (permanent deletion)
       const deleteBtn = this.headerEl.querySelector('.btn-delete');
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.app.deleteNote(this.data.id);
       });
 
-      // Dragging
       this.setupDragging();
-
-      // Resizing
       this.setupResizing();
 
-      // Heading Input
       this.headingInput.addEventListener('input', () => {
         this.data.heading = this.headingInput.value;
         this.data.updatedAt = Date.now();
@@ -1307,10 +1269,7 @@
         }
       });
 
-      // Toolbar
       this.setupToolbar();
-
-      // Editor
       this.setupEditor();
     }
 
