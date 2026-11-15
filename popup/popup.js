@@ -19,6 +19,67 @@ document.addEventListener('DOMContentLoaded', async () => {
   const newKeyHint = document.getElementById('newKeyHint');
   const toggleKeyHint = document.getElementById('toggleKeyHint');
 
+  // Custom Styled Modal elements
+  const modalBackdrop = document.getElementById('modalBackdrop');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalMessage = document.getElementById('modalMessage');
+  const modalBtnCancel = document.getElementById('modalBtnCancel');
+  const modalBtnConfirm = document.getElementById('modalBtnConfirm');
+  const toastEl = document.getElementById('toast');
+
+  let modalResolver = null;
+
+  function showConfirmDialog({ title, message, confirmText = 'Delete', danger = true }) {
+    return new Promise((resolve) => {
+      modalTitle.textContent = title;
+      modalMessage.textContent = message;
+      modalBtnConfirm.textContent = confirmText;
+      if (danger) {
+        modalBtnConfirm.className = 'btn btn-danger';
+      } else {
+        modalBtnConfirm.className = 'btn btn-primary';
+      }
+      modalResolver = resolve;
+      modalBackdrop.style.display = 'flex';
+    });
+  }
+
+  modalBtnCancel.addEventListener('click', () => {
+    modalBackdrop.style.display = 'none';
+    if (modalResolver) {
+      modalResolver(false);
+      modalResolver = null;
+    }
+  });
+
+  modalBtnConfirm.addEventListener('click', () => {
+    modalBackdrop.style.display = 'none';
+    if (modalResolver) {
+      modalResolver(true);
+      modalResolver = null;
+    }
+  });
+
+  modalBackdrop.addEventListener('click', (e) => {
+    if (e.target === modalBackdrop) {
+      modalBackdrop.style.display = 'none';
+      if (modalResolver) {
+        modalResolver(false);
+        modalResolver = null;
+      }
+    }
+  });
+
+  let toastTimer = null;
+  function showToast(msg) {
+    clearTimeout(toastTimer);
+    toastEl.textContent = msg;
+    toastEl.style.display = 'block';
+    toastTimer = setTimeout(() => {
+      toastEl.style.display = 'none';
+    }, 2400);
+  }
+
   const isMac = navigator.userAgent.toLowerCase().includes('mac');
   if (isMac) {
     if (newKeyHint) newKeyHint.textContent = 'Cmd+Shift+N';
@@ -45,7 +106,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.debug('Active tab query:', err);
   }
 
-  // Safe tab messenger
   async function sendMessageToContent(message) {
     if (!isWebPage || !activeTab || !activeTab.id) return null;
     try {
@@ -64,13 +124,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Load and migrate legacy per-URL notes into global store
   async function loadGlobalNotes() {
     try {
       const allData = await chrome.storage.local.get(null);
       let globalList = Array.isArray(allData[GLOBAL_STORAGE_KEY]) ? allData[GLOBAL_STORAGE_KEY] : [];
 
-      // Check legacy keys
       const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== GLOBAL_STORAGE_KEY);
       if (legacyKeys.length > 0) {
         const existingIds = new Set(globalList.map(n => n.id));
@@ -218,12 +276,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
 
-      // Delete button
+      // Delete button with custom styled confirm dialog
       const delBtn = card.querySelector('.btn-card-delete');
       delBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const confirmDelete = window.confirm('Permanently delete this sticky note?');
-        if (!confirmDelete) return;
+
+        const confirmed = await showConfirmDialog({
+          title: 'Delete Sticky Note?',
+          message: `Permanently delete "${title}"? This cannot be undone.`,
+          confirmText: 'Delete Note',
+          danger: true
+        });
+
+        if (!confirmed) return;
 
         allNotes = allNotes.filter(n => n.id !== note.id);
         await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: allNotes });
@@ -233,6 +298,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         renderNotes(getFilteredNotes());
+        showToast('Sticky note deleted');
       });
 
       notesListEl.appendChild(card);
@@ -301,7 +367,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export Notes to Markdown
   btnExport.addEventListener('click', () => {
     if (allNotes.length === 0) {
-      alert('No sticky notes to export.');
+      showToast('No sticky notes to export');
       return;
     }
 
@@ -330,13 +396,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showToast('Exported to Markdown');
   });
 
-  // Clear All Notes
+  // Clear All Notes with Custom Styled Confirm
   btnClearAll.addEventListener('click', async () => {
     if (allNotes.length === 0) return;
-    const confirmClear = window.confirm(`Permanently delete all ${allNotes.length} sticky notes everywhere?`);
-    if (!confirmClear) return;
+
+    const confirmed = await showConfirmDialog({
+      title: 'Delete All Sticky Notes?',
+      message: `Permanently delete all ${allNotes.length} sticky notes everywhere? This action cannot be undone.`,
+      confirmText: 'Delete All Notes',
+      danger: true
+    });
+
+    if (!confirmed) return;
 
     allNotes = [];
     await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: [] });
@@ -346,6 +420,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     renderNotes([]);
+    showToast('All sticky notes deleted');
   });
 
   // Search
@@ -374,6 +449,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Initialize
   loadGlobalNotes();
 });

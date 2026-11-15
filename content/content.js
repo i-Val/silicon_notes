@@ -553,6 +553,102 @@
     .note-resizer:hover {
       color: rgba(24, 24, 27, 0.75);
     }
+
+    /* Beautiful Styled Confirm Overlay */
+    .note-confirm-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(24, 24, 27, 0.88);
+      backdrop-filter: blur(4px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      text-align: center;
+      z-index: 100;
+      border-radius: 11px;
+      animation: overlayFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      color: #ffffff;
+      user-select: none;
+    }
+
+    @keyframes overlayFadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .confirm-icon-wrap {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.22);
+      color: #f87171;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+    }
+
+    .confirm-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+
+    .confirm-desc {
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.75);
+      line-height: 1.4;
+      margin-bottom: 14px;
+      max-width: 190px;
+    }
+
+    .confirm-actions {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 190px;
+    }
+
+    .btn-confirm-cancel, .btn-confirm-delete {
+      flex: 1;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .btn-confirm-cancel {
+      background: rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+    }
+
+    .btn-confirm-cancel:hover {
+      background: rgba(255, 255, 255, 0.28);
+    }
+
+    .btn-confirm-delete {
+      background: #ef4444;
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-confirm-delete:hover {
+      background: #dc2626;
+    }
+
+    .btn-confirm-delete:active, .btn-confirm-cancel:active {
+      transform: scale(0.96);
+    }
   `;
 
   // --- Sticky Note Manager ---
@@ -600,13 +696,12 @@
       }
     }
 
-    // Loads notes globally, automatically migrating any previous per-URL notes
     async loadNotesWithMigration() {
       try {
         const allData = await chrome.storage.local.get(null);
         let globalList = Array.isArray(allData[this.storageKey]) ? allData[this.storageKey] : [];
 
-        // Check if there are legacy per-URL keys (keys starting with 'notes:')
+        // Check legacy keys
         const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== this.storageKey);
         if (legacyKeys.length > 0) {
           const existingIds = new Set(globalList.map(n => n.id));
@@ -629,7 +724,6 @@
           }
         }
 
-        // Populate in-memory map and render active notes
         this.container.innerHTML = '';
         this.controllers.clear();
         this.notesMap.clear();
@@ -693,7 +787,6 @@
       return controller;
     }
 
-    // Close note: stashes it off-screen, but keeps it permanently saved
     closeNote(id) {
       const controller = this.controllers.get(id);
       const data = this.notesMap.get(id);
@@ -722,7 +815,6 @@
       this.notifyBadgeUpdate();
     }
 
-    // Reopen closed note back onto the page
     reopenNote(id) {
       let data = this.notesMap.get(id);
       if (!data) return false;
@@ -754,7 +846,6 @@
       return true;
     }
 
-    // Permanent deletion
     deleteNote(id) {
       const controller = this.controllers.get(id);
       this.notesMap.delete(id);
@@ -889,7 +980,6 @@
         }
       });
 
-      // Real-time global sync across all browser tabs
       chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== 'local') return;
         if (changes[this.storageKey]) {
@@ -912,7 +1002,6 @@
       const newMap = new Map(newList.map(n => [n.id, n]));
       this.notesMap = newMap;
 
-      // Remove deleted notes or closed notes from this page
       for (const [id, controller] of this.controllers.entries()) {
         const updated = newMap.get(id);
         if (!updated || updated.closed) {
@@ -924,7 +1013,6 @@
         }
       }
 
-      // Add or update open notes
       for (const item of newList) {
         if (item.closed) continue;
 
@@ -972,6 +1060,7 @@
       this.bodyEl = null;
       this.resizerEl = null;
       this.palettePopover = null;
+      this.confirmOverlay = null;
 
       this.isDragging = false;
       this.isResizing = false;
@@ -1195,6 +1284,52 @@
       }, 0);
     }
 
+    // Styled In-Note Confirmation Dialog
+    promptDeleteConfirm() {
+      if (this.confirmOverlay) {
+        this.confirmOverlay.remove();
+        this.confirmOverlay = null;
+      }
+
+      this.confirmOverlay = document.createElement('div');
+      this.confirmOverlay.className = 'note-confirm-overlay';
+      this.confirmOverlay.innerHTML = `
+        <div class="confirm-icon-wrap">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </div>
+        <div class="confirm-title">Delete Note?</div>
+        <div class="confirm-desc">This note will be permanently removed everywhere.</div>
+        <div class="confirm-actions">
+          <button class="btn-confirm-cancel">Cancel</button>
+          <button class="btn-confirm-delete">Delete</button>
+        </div>
+      `;
+
+      const cancelBtn = this.confirmOverlay.querySelector('.btn-confirm-cancel');
+      cancelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.confirmOverlay.remove();
+        this.confirmOverlay = null;
+      });
+
+      const deleteBtn = this.confirmOverlay.querySelector('.btn-confirm-delete');
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.confirmOverlay.remove();
+        this.confirmOverlay = null;
+        this.app.deleteNote(this.data.id);
+      });
+
+      this.confirmOverlay.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
+      this.element.appendChild(this.confirmOverlay);
+    }
+
     focusHeading() {
       if (this.headingInput) {
         this.headingInput.focus();
@@ -1246,7 +1381,7 @@
       const deleteBtn = this.headerEl.querySelector('.btn-delete');
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.app.deleteNote(this.data.id);
+        this.promptDeleteConfirm();
       });
 
       this.setupDragging();
@@ -1318,7 +1453,7 @@
       };
 
       this.headerEl.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0 || e.target.closest('.btn-header') || e.target.closest('.palette-popover')) {
+        if (e.button !== 0 || e.target.closest('.btn-header') || e.target.closest('.palette-popover') || e.target.closest('.note-confirm-overlay')) {
           return;
         }
 
@@ -1572,6 +1707,9 @@
     destroy() {
       if (this.palettePopover) {
         this.palettePopover.remove();
+      }
+      if (this.confirmOverlay) {
+        this.confirmOverlay.remove();
       }
     }
   }
