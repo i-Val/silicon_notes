@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rich Web Sticky Notes - Test & Demo Environment</title>
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #1e293b;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    header {
+      background: linear-gradient(135deg, #1e1b4b, #312e81);
+      color: white;
+      padding: 48px 24px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0 0 12px 0;
+      font-size: 2.25rem;
+    }
+    header p {
+      margin: 0 auto;
+      max-width: 600px;
+      opacity: 0.9;
+      font-size: 1.1rem;
+    }
+    .container {
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 28px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      margin-bottom: 24px;
+      border: 1px solid #e2e8f0;
+    }
+    h2 {
+      margin-top: 0;
+      color: #0f172a;
+    }
+    ul, ol {
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    code {
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #0f172a;
+    }
+    kbd {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-weight: 600;
+      box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rich Web Sticky Notes Demo Playground</h1>
+    <p>Test the full capability of the extension directly on this page: rich text editing, dragging, resizing, color switching, collapsing, and multi-tab persistence.</p>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <span class="badge">Getting Started</span>
+      <h2>How to Test this Chrome Extension</h2>
+      <ol>
+        <li>Open Chrome and navigate to <code>chrome://extensions</code></li>
+        <li>Enable <strong>Developer mode</strong> in the top-right corner.</li>
+        <li>Click <strong>Load unpacked</strong> and select this folder (<code>silicon_notes</code>).</li>
+        <li>Open this demo page (or any webpage on the internet).</li>
+        <li>Click the extension icon in the toolbar or press <kbd>Alt+Shift+N</kbd> (Mac: <kbd>Cmd+Shift+N</kbd>) to spawn a new sticky note!</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>Feature Verification Checklist</h2>
+      <ul>
+        <li><strong>Drag & Viewport Bounds:</strong> Drag any note by its top header bar. Notice smooth motion and viewport clamping so it cannot be dragged off-screen.</li>
+        <li><strong>Rich Text Formatting:</strong> Select text in the note and use the toolbar or shortcuts:
+          <code>Ctrl+B</code> (Bold), <code>Ctrl+I</code> (Italic), <code>Ctrl+U</code> (Underline), Strikethrough, Bulleted Lists, Numbered Lists, and Inline Code.</li>
+        <li><strong>Active State Reflection:</strong> Notice how toolbar buttons highlight when your caret moves into bold, italic, or list items.</li>
+        <li><strong>Focus Preservation:</strong> Clicking toolbar buttons never collapses your selection in the note.</li>
+        <li><strong>Color Themes:</strong> Click the palette icon in the header to switch between 4 WCAG-compliant pastel themes (Yellow, Mint Green, Sky Blue, Rose Pink).</li>
+        <li><strong>Collapse / Expand:</strong> Click the minus button (<code>–</code>) in the header to fold the note down to just its title.</li>
+        <li><strong>Corner Resizing:</strong> Drag the bottom-right corner to resize. Custom dimensions are saved!</li>
+        <li><strong>Shadow DOM Isolation:</strong> Webpage stylesheets and resets never bleed into the sticky notes.</li>
+        <li><strong>Persistence:</strong> Refresh the page or close and re-open Chrome. Your notes stay exactly where you placed them!</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
