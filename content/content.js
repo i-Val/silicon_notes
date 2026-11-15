@@ -246,6 +246,7 @@
       min-height: 0 !important;
       height: auto !important;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      cursor: pointer;
     }
 
     .sticky-note.is-collapsed .note-toolbar,
@@ -342,13 +343,15 @@
       right: 36px;
       background: #ffffff;
       border-radius: 8px;
-      padding: 6px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.1);
+      padding: 6px 8px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.12);
       display: flex;
-      gap: 6px;
-      z-index: 100;
-      border: 1px solid rgba(0,0,0,0.08);
+      gap: 7px;
+      z-index: 1000;
+      border: 1px solid rgba(0,0,0,0.1);
       animation: fadeIn 0.12s ease-out;
+      pointer-events: auto !important;
+      user-select: none;
     }
 
     .palette-swatch {
@@ -358,15 +361,21 @@
       border: 2px solid transparent;
       cursor: pointer;
       transition: transform 0.15s, border-color 0.15s;
+      pointer-events: auto !important;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
 
     .palette-swatch:hover {
-      transform: scale(1.15);
+      transform: scale(1.18);
+    }
+
+    .palette-swatch:active {
+      transform: scale(0.95);
     }
 
     .palette-swatch.selected {
       border-color: #18181b;
-      transform: scale(1.08);
+      transform: scale(1.1);
     }
 
     @keyframes fadeIn {
@@ -554,7 +563,7 @@
       color: rgba(24, 24, 27, 0.75);
     }
 
-    /* Beautiful Styled Confirm Overlay */
+    /* Styled In-Note Delete Confirmation */
     .note-confirm-overlay {
       position: absolute;
       top: 0;
@@ -815,6 +824,7 @@
       this.notifyBadgeUpdate();
     }
 
+    // Reopen closed note back onto the page and focus it
     reopenNote(id) {
       let data = this.notesMap.get(id);
       if (!data) return false;
@@ -822,16 +832,25 @@
       data.closed = false;
       data.updatedAt = Date.now();
 
+      if (!this.isVisible) {
+        this.toggleVisibility();
+      }
+
       let controller = this.controllers.get(id);
       if (!controller) {
         controller = new NoteController(this, data);
         this.controllers.set(id, controller);
         this.container.appendChild(controller.element);
+      } else {
+        controller.data.closed = false;
+        controller.element.style.display = 'flex';
+        controller.element.style.opacity = '1';
+        controller.element.style.transform = 'scale(1)';
       }
 
-      controller.element.style.display = 'flex';
-      controller.element.style.opacity = '1';
-      controller.element.style.transform = 'scale(1)';
+      if (controller.data.collapsed) {
+        controller.toggleCollapse();
+      }
 
       this.bringToFront(controller);
       controller.clampToViewport();
@@ -840,7 +859,7 @@
       void controller.element.offsetWidth;
       controller.element.classList.add('highlight-pulse');
 
-      controller.focusBody();
+      controller.focusHeading();
       this.persistNow();
       this.notifyBadgeUpdate();
       return true;
@@ -921,9 +940,13 @@
         return this.reopenNote(id);
       }
 
-      const controller = this.controllers.get(id);
       if (!this.isVisible) {
         this.toggleVisibility();
+      }
+
+      const controller = this.controllers.get(id);
+      if (controller.data.collapsed) {
+        controller.toggleCollapse();
       }
 
       this.bringToFront(controller);
@@ -933,7 +956,7 @@
       void controller.element.offsetWidth;
       controller.element.classList.add('highlight-pulse');
 
-      controller.focusBody();
+      controller.focusHeading();
       return true;
     }
 
@@ -1201,6 +1224,9 @@
       this.element.style.setProperty('--note-hover-btn', theme.hoverBtn);
       this.element.style.setProperty('--note-active-btn', theme.activeBtn);
       this.element.style.backgroundColor = theme.bg;
+      if (this.headerEl) {
+        this.headerEl.style.backgroundColor = theme.headerBg;
+      }
     }
 
     applyPosition() {
@@ -1251,37 +1277,51 @@
       this.palettePopover = document.createElement('div');
       this.palettePopover.className = 'palette-popover';
 
+      const paletteBtn = this.headerEl.querySelector('.btn-palette');
+
       THEME_KEYS.forEach((key) => {
         const theme = THEMES[key];
         const swatch = document.createElement('div');
-        swatch.className = `palette-swatch ${theme.bg === this.data.color ? 'selected' : ''}`;
+        const isSelected = theme.bg.toLowerCase() === this.data.color.toLowerCase();
+        swatch.className = `palette-swatch ${isSelected ? 'selected' : ''}`;
         swatch.style.backgroundColor = theme.bg;
         swatch.title = theme.name;
 
-        swatch.addEventListener('click', (e) => {
+        // Both pointerdown and click handlers ensure theme changes reliably in Shadow DOM
+        const onSelect = (e) => {
           e.stopPropagation();
+          e.preventDefault();
           this.applyTheme(theme.bg);
           this.data.updatedAt = Date.now();
           this.app.persistNow();
-          this.palettePopover.remove();
-          this.palettePopover = null;
-        });
+          if (this.palettePopover) {
+            this.palettePopover.remove();
+            this.palettePopover = null;
+          }
+          document.removeEventListener('pointerdown', dismissHandler, true);
+        };
+
+        swatch.addEventListener('pointerdown', onSelect);
+        swatch.addEventListener('click', onSelect);
 
         this.palettePopover.appendChild(swatch);
       });
 
       this.element.appendChild(this.palettePopover);
 
+      // Shadow DOM retargeting-safe outside click dismiss handler
       const dismissHandler = (e) => {
-        if (this.palettePopover && !this.palettePopover.contains(e.target)) {
+        const path = e.composedPath ? e.composedPath() : [];
+        if (this.palettePopover && !path.includes(this.palettePopover) && !path.includes(paletteBtn)) {
           this.palettePopover.remove();
           this.palettePopover = null;
-          document.removeEventListener('pointerdown', dismissHandler);
+          document.removeEventListener('pointerdown', dismissHandler, true);
         }
       };
+
       setTimeout(() => {
-        document.addEventListener('pointerdown', dismissHandler);
-      }, 0);
+        document.addEventListener('pointerdown', dismissHandler, true);
+      }, 50);
     }
 
     // Styled In-Note Confirmation Dialog
@@ -1372,6 +1412,12 @@
         this.toggleCollapse();
       });
 
+      // Double clicking header expands or collapses note
+      this.headerEl.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.btn-header') || e.target.closest('.palette-popover')) return;
+        this.toggleCollapse();
+      });
+
       const closeBtn = this.headerEl.querySelector('.btn-close');
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1395,6 +1441,13 @@
 
       this.headingInput.addEventListener('blur', () => {
         this.app.persistNow();
+      });
+
+      // Clicking heading of a collapsed note expands it
+      this.headingInput.addEventListener('focus', () => {
+        if (this.data.collapsed) {
+          this.toggleCollapse();
+        }
       });
 
       this.headingInput.addEventListener('keydown', (e) => {
