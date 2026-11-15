@@ -6,10 +6,28 @@ function getNormalizedUrlKey(url) {
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
-      return null;
+
+    // Canvas extension page
+    if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
+      return 'notes:canvas_workspace';
     }
-    return `notes:${parsed.origin}${parsed.pathname}`;
+
+    // about:blank
+    if (parsed.protocol === 'about:' || url === 'about:blank') {
+      return 'notes:about_blank';
+    }
+
+    // file:// (parsed.origin is "null" in Chromium)
+    if (parsed.protocol === 'file:') {
+      return `notes:file_${parsed.pathname}`;
+    }
+
+    // Web and localhost
+    if (['http:', 'https:'].includes(parsed.protocol)) {
+      return `notes:${parsed.origin}${parsed.pathname}`;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -26,20 +44,21 @@ async function updateTabBadge(tabId, url) {
   try {
     const data = await chrome.storage.local.get(key);
     const notes = Array.isArray(data[key]) ? data[key] : [];
-    const count = notes.length;
-    
+    // Count only active (unclosed) notes
+    const activeCount = notes.filter(n => !n.closed).length;
+
     await chrome.action.setBadgeText({
       tabId,
-      text: count > 0 ? String(count) : ''
+      text: activeCount > 0 ? String(activeCount) : ''
     });
     await chrome.action.setBadgeBackgroundColor({
       tabId,
-      color: '#eab308' // Amber yellow accent matching default note
+      color: '#eab308'
     });
     if (chrome.action.setBadgeTextColor) {
       await chrome.action.setBadgeTextColor({
         tabId,
-        color: '#18181b' // Dark charcoal text
+        color: '#18181b'
       });
     }
   } catch (err) {
@@ -47,19 +66,17 @@ async function updateTabBadge(tabId, url) {
   }
 }
 
-// Send a message to content script, auto-injecting if not present
+// Send a message to content script, auto-injecting if needed
 async function sendMessageToTab(tabId, message) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (err) {
-    // Content script might not be injected yet
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
         files: ['content/content.js']
       });
-      // Small pause to allow script initialization
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 120));
       return await chrome.tabs.sendMessage(tabId, message);
     } catch (injectionErr) {
       console.warn('Cannot inject content script on this tab:', injectionErr);
@@ -74,7 +91,15 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!activeTab || !activeTab.id || !activeTab.url) return;
 
   const key = getNormalizedUrlKey(activeTab.url);
-  if (!key) return; // Ignore internal chrome:// pages
+
+  // If on a browser-internal page (like chrome://newtab), open the canvas workspace
+  if (!key) {
+    if (command === 'new-sticky-note') {
+      const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
+      chrome.tabs.create({ url: canvasUrl });
+    }
+    return;
+  }
 
   if (command === 'new-sticky-note') {
     sendMessageToTab(activeTab.id, { action: 'CREATE_NOTE' }).catch(() => {});
@@ -97,12 +122,10 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     if (tab && tab.url) {
       updateTabBadge(activeInfo.tabId, tab.url);
     }
-  } catch (err) {
-    // Tab might be closing
-  }
+  } catch (err) {}
 });
 
-// Listen to storage changes to update badge in real time
+// Real-time badge update on storage change
 chrome.storage.onChanged.addListener(async (changes, areaName) => {
   if (areaName !== 'local') return;
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -111,10 +134,10 @@ chrome.storage.onChanged.addListener(async (changes, areaName) => {
   const currentKey = getNormalizedUrlKey(activeTab.url);
   if (currentKey && changes[currentKey]) {
     const newNotes = changes[currentKey].newValue || [];
-    const count = Array.isArray(newNotes) ? newNotes.length : 0;
+    const activeCount = Array.isArray(newNotes) ? newNotes.filter(n => !n.closed).length : 0;
     chrome.action.setBadgeText({
       tabId: activeTab.id,
-      text: count > 0 ? String(count) : ''
+      text: activeCount > 0 ? String(activeCount) : ''
     }).catch(() => {});
   }
 });

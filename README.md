@@ -1,6 +1,6 @@
 # Rich Web Sticky Notes (Chrome Extension)
 
-A lightweight Chrome Extension (Manifest V3) that lets you create, format, drag, resize, collapse, and persist rich text sticky notes directly on any webpage.
+A lightweight Chrome Extension (Manifest V3) that lets you create, format, drag, resize, collapse, and persist rich text sticky notes directly on any webpage, localhost, or on a dedicated blank canvas workspace.
 
 Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero third-party dependencies.
 
@@ -20,6 +20,18 @@ Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero t
   - **Active State Reflection:** Toolbar buttons automatically highlight based on the active cursor selection.
   - **Focus Preservation:** Clicking formatting buttons never loses your cursor position or text selection.
 - **Paste & HTML Sanitization:** Automatically strips invasive inline CSS, classes, scripts, and trackers from pasted content. Whitelists only safe formatting tags (`<b>`, `<strong>`, `<i>`, `<em>`, `<u>`, `<s>`, `<ul>`, `<ol>`, `<li>`, `<code>`, `<br>`, `<div>`, `<p>`).
+- **Guaranteed Persistence (Zero Data Loss):**
+  - Notes automatically persist per page URL (`notes:${origin}${pathname}`) or canvas (`notes:canvas_workspace`).
+  - Closing a note (`✕`) stashes it safely off-screen **without deleting your content**. You can reopen any closed note at any time with a single click from the extension popup.
+  - Permanent deletion is handled explicitly via the Trash icon (`🗑`) with confirmation.
+  - Immediate state persistence on `blur`, `dragend`, `resize`, `beforeunload`, and `pagehide`.
+- **Full Localhost & Port Support:**
+  - Works seamlessly on `localhost`, `127.0.0.1`, and any local dev server port (`:3000`, `:5173`, `:8080`, etc.).
+  - Guaranteed DOM isolation with inline reset styles so Tailwind, Bootstrap, or custom CSS resets never hide or distort sticky notes.
+- **Blank Tabs & Dedicated Notes Canvas:**
+  - Chrome strictly restricts content scripts on internal pages like `chrome://newtab`. To solve this, the extension includes a built-in **Blank Notes Canvas** (`canvas/canvas.html`) with an infinite dot-grid workspace.
+  - Pressing `Alt+Shift+N` on a new tab or clicking "Open Canvas" in the popup launches the canvas instantly.
+  - Also supports `about:blank`.
 - **4 Pastel Themes (WCAG Compliant):**
   - 💛 Pastel Yellow (`#fef08a`)
   - 💚 Mint Green (`#bbf7d0`)
@@ -28,16 +40,12 @@ Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero t
   - Paired with high-contrast charcoal text (`#18181b`) for optimal readability.
 - **Collapsible & Resizable:**
   - Fold notes down to just their title bar (`–` / `+`).
-  - Drag the bottom-right corner to resize (`min-width: 240px`, `min-height: 200px`). Dimensions persist automatically.
-- **DOM & CSS Isolation:** Injected inside an open Shadow DOM root (`#rich-web-sticky-notes-root`), ensuring host webpage styles and frameworks (Tailwind, Bootstrap, resets) never break the note UI.
-- **Persistence & Multi-Tab Sync:**
-  - Keyed by normalized page URL (`notes:${origin}${pathname}`). Ignores volatile query parameters like `?utm_source=...`.
-  - Automatically synchronizes note changes across multiple open tabs of the same webpage in real time via `chrome.storage.onChanged`.
+  - Drag the bottom-right corner to resize (`min-width: 240px`, `min-height: 200px`). Custom dimensions persist automatically.
 - **Extension Action Popup:**
-  - List and search all notes on the current tab.
-  - Jump-to-note feature with a smooth highlight pulse animation.
-  - Export all notes on the page to a Markdown (`.md`) file.
-  - Toggle show/hide notes on the page.
+  - Search and filter notes on the current page or canvas.
+  - Reopen closed notes or jump to active notes with a highlight pulse animation.
+  - Export notes on the page to a Markdown (`.md`) file.
+  - Toggle show/hide notes on the page (`Alt+Shift+H`).
   - Dynamic note count badge on the extension icon.
 
 ---
@@ -56,14 +64,16 @@ Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero t
 
 ## 🚀 Installation & Testing
 
-1. Open Google Chrome (or any Chromium browser like Brave, Edge, Arc).
+1. Open Google Chrome.
 2. Go to `chrome://extensions/`.
 3. In the top-right corner, turn on **Developer mode**.
-4. Click **Load unpacked**.
+4. Click **Load unpacked** (or click the reload icon 🔄 if already loaded).
 5. Select this project folder (`silicon_notes`).
-6. Open [`test/demo.html`](test/demo.html) in Chrome or visit any website.
-7. Click the extension puzzle icon and pin **Rich Web Sticky Notes** to your toolbar.
-8. Click **New Note** or press `Alt + Shift + N` to create your first sticky note!
+6. Pin **Rich Web Sticky Notes** to your Chrome toolbar.
+7. Test across different environments:
+   - **On any website:** Visit any site and press `Alt+Shift+N`.
+   - **On localhost:** Open any local dev server (`http://localhost:3000` or Laragon) and create notes.
+   - **On blank tabs:** Click the extension icon or press `Alt+Shift+N` on a new tab to launch the full-screen **Blank Notes Canvas**.
 
 ---
 
@@ -71,15 +81,17 @@ Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero t
 
 ```
 silicon_notes/
-├── manifest.json              # Manifest V3 configuration & command shortcuts
+├── manifest.json              # Manifest V3 config & command shortcuts
 ├── background/
-│   └── service_worker.js      # Background worker handling commands & badges
+│   └── service_worker.js      # Background worker handling commands, badges & canvas routing
+├── canvas/
+│   └── canvas.html            # Full-screen blank notes workspace
 ├── content/
-│   └── content.js             # Core engine with Shadow DOM isolation & note controls
+│   └── content.js             # Core engine with Shadow DOM isolation, persistent storage & note controls
 ├── popup/
 │   ├── popup.html             # Extension action popup
 │   ├── popup.css              # Popup styling
-│   └── popup.js               # Search, jump-to, export & management logic
+│   └── popup.js               # Search, jump-to, reopen, export & management logic
 ├── icons/
 │   ├── icon16.png
 │   ├── icon32.png
@@ -88,6 +100,6 @@ silicon_notes/
 │   ├── icon.svg
 │   └── generate_icons.py
 ├── test/
-│   └── demo.html              # Testing & verification playground
+│   └── demo.html              # Testing playground
 └── README.md
 ```

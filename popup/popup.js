@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const badgeCountEl = document.getElementById('notesCountBadge');
   const notesListEl = document.getElementById('notesList');
   const btnNewNote = document.getElementById('btnNewNote');
+  const btnNewNoteText = document.getElementById('btnNewNoteText');
+  const btnOpenCanvasTop = document.getElementById('btnOpenCanvasTop');
   const btnToggleVisibility = document.getElementById('btnToggleVisibility');
   const btnExport = document.getElementById('btnExport');
   const btnClearAll = document.getElementById('btnClearAll');
@@ -14,6 +16,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const searchClear = document.getElementById('searchClear');
   const newKeyHint = document.getElementById('newKeyHint');
   const toggleKeyHint = document.getElementById('toggleKeyHint');
+  const restrictedBanner = document.getElementById('restrictedBanner');
+  const btnLaunchCanvas = document.getElementById('btnLaunchCanvas');
 
   // Platform specific shortcuts display
   const isMac = navigator.userAgent.toLowerCase().includes('mac');
@@ -25,8 +29,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   let activeTab = null;
   let allNotes = [];
   let isNotesVisible = true;
+  let isRestrictedPage = false;
+  let currentStorageKey = null;
 
-  // 1. Get Active Tab
+  // Normalized Storage Key helper
+  function computeStorageKey(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
+        return 'notes:canvas_workspace';
+      }
+      if (parsed.protocol === 'about:' || url === 'about:blank') {
+        return 'notes:about_blank';
+      }
+      if (parsed.protocol === 'file:') {
+        return `notes:file_${parsed.pathname}`;
+      }
+      if (['http:', 'https:'].includes(parsed.protocol)) {
+        return `notes:${parsed.origin}${parsed.pathname}`;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 1. Detect Active Tab
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     activeTab = tab;
@@ -35,29 +63,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (!activeTab || !activeTab.id || !activeTab.url) {
-    renderUnavailable('No active webpage detected.');
+    setupRestrictedMode('No active tab detected');
     return;
   }
 
-  // Display URL nicely
-  try {
-    const urlObj = new URL(activeTab.url);
-    if (!['http:', 'https:', 'file:'].includes(urlObj.protocol)) {
-      renderUnavailable('Sticky notes cannot be added to browser internal or settings pages.');
-      return;
+  currentStorageKey = computeStorageKey(activeTab.url);
+
+  // If on browser internal page (like chrome://newtab), switch to Canvas Companion Mode
+  if (!currentStorageKey) {
+    setupRestrictedMode('Chrome New Tab / Internal Page');
+  } else {
+    // Normal Web, Localhost, File, or Canvas Page
+    try {
+      const parsed = new URL(activeTab.url);
+      if (parsed.protocol === 'chrome-extension:' && parsed.pathname.includes('canvas')) {
+        pageUrlEl.textContent = 'Notes Canvas';
+      } else if (parsed.protocol === 'about:') {
+        pageUrlEl.textContent = 'about:blank';
+      } else {
+        pageUrlEl.textContent = `${parsed.hostname || ''}${parsed.pathname}`;
+      }
+      pageUrlEl.title = activeTab.url;
+    } catch {
+      pageUrlEl.textContent = activeTab.url;
     }
-    pageUrlEl.textContent = `${urlObj.hostname}${urlObj.pathname}`;
-    pageUrlEl.title = activeTab.url;
-  } catch {
-    pageUrlEl.textContent = activeTab.url;
+    loadNotes();
   }
 
-  // Safe tab messenger with auto-injection
+  function setupRestrictedMode(title) {
+    isRestrictedPage = true;
+    currentStorageKey = 'notes:canvas_workspace';
+    pageUrlEl.textContent = title;
+    restrictedBanner.style.display = 'flex';
+    if (btnNewNoteText) btnNewNoteText.textContent = 'New Note (Canvas)';
+    btnToggleVisibility.disabled = true;
+    loadNotesFromStorageDirectly();
+  }
+
+  // Tab messenger with auto-injection
   async function sendMessageToContent(message) {
+    if (isRestrictedPage) return null;
     try {
       return await chrome.tabs.sendMessage(activeTab.id, message);
     } catch (err) {
-      // Try injecting script if missing
       try {
         await chrome.scripting.executeScript({
           target: { tabId: activeTab.id },
@@ -71,7 +119,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Strip HTML for snippet display
   function htmlToPlainText(html) {
     if (!html) return '';
     const temp = document.createElement('div');
@@ -79,7 +126,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return temp.textContent || temp.innerText || '';
   }
 
-  // Format relative time
   function formatRelativeTime(timestamp) {
     if (!timestamp) return 'Just now';
     const diff = Math.floor((Date.now() - timestamp) / 1000);
@@ -93,7 +139,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${days}d ago`;
   }
 
-  // Load notes from content script
   async function loadNotes() {
     try {
       const response = await sendMessageToContent({ action: 'GET_NOTES' });
@@ -102,19 +147,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         isNotesVisible = response.isVisible !== false;
         updateVisibilityIcon();
         renderNotes(getFilteredNotes());
+      } else {
+        await loadNotesFromStorageDirectly();
       }
     } catch (err) {
-      console.warn('Could not connect to content script:', err);
-      // Fallback: read directly from storage
-      try {
-        const urlObj = new URL(activeTab.url);
-        const key = `notes:${urlObj.origin}${urlObj.pathname}`;
-        const data = await chrome.storage.local.get(key);
-        allNotes = Array.isArray(data[key]) ? data[key] : [];
-        renderNotes(getFilteredNotes());
-      } catch (storageErr) {
-        renderUnavailable('Unable to load notes for this page.');
-      }
+      await loadNotesFromStorageDirectly();
+    }
+  }
+
+  async function loadNotesFromStorageDirectly() {
+    try {
+      if (!currentStorageKey) return;
+      const data = await chrome.storage.local.get(currentStorageKey);
+      allNotes = Array.isArray(data[currentStorageKey]) ? data[currentStorageKey] : [];
+      renderNotes(getFilteredNotes());
+    } catch (e) {
+      renderNotes([]);
     }
   }
 
@@ -152,29 +200,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function renderUnavailable(message) {
-    badgeCountEl.textContent = 'Unavailable';
-    btnNewNote.disabled = true;
-    btnToggleVisibility.disabled = true;
-    btnExport.disabled = true;
-    btnClearAll.disabled = true;
-    searchInput.disabled = true;
-
-    notesListEl.innerHTML = `
-      <div class="empty-state">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-        <div class="empty-title">Cannot Add Notes Here</div>
-        <div class="empty-desc">${message}</div>
-      </div>
-    `;
-  }
-
   function renderNotes(notes) {
-    badgeCountEl.textContent = `${allNotes.length} note${allNotes.length === 1 ? '' : 's'}`;
+    const activeCount = allNotes.filter(n => !n.closed).length;
+    badgeCountEl.textContent = `${activeCount} active (${allNotes.length} total)`;
 
     if (allNotes.length === 0) {
       notesListEl.innerHTML = `
@@ -186,8 +214,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             <line x1="16" y1="17" x2="8" y2="17"></line>
             <polyline points="10 9 9 9 8 9"></polyline>
           </svg>
-          <div class="empty-title">No Sticky Notes on this Page</div>
-          <div class="empty-desc">Click "New Note" above or press <kbd>${isMac ? 'Cmd+Shift+N' : 'Alt+Shift+N'}</kbd> to add your first sticky note.</div>
+          <div class="empty-title">No Sticky Notes Found</div>
+          <div class="empty-desc">${isRestrictedPage ? 'Click "New Note (Canvas)" to create a note on the Blank Notes Canvas.' : 'Click "New Note" above or press Alt+Shift+N to create a sticky note.'}</div>
         </div>
       `;
       return;
@@ -197,7 +225,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       notesListEl.innerHTML = `
         <div class="empty-state">
           <div class="empty-title">No Matching Notes</div>
-          <div class="empty-desc">No notes match "${searchInput.value}".</div>
+          <div class="empty-desc">No notes match "${escapeHtml(searchInput.value)}".</div>
         </div>
       `;
       return;
@@ -207,38 +235,53 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     notes.forEach((note) => {
       const card = document.createElement('div');
-      card.className = 'note-card';
+      card.className = `note-card ${note.closed ? 'is-closed' : ''}`;
       card.dataset.id = note.id;
 
       const title = note.heading ? note.heading.trim() : 'Untitled Note';
       const snippet = htmlToPlainText(note.bodyHtml).trim();
       const timeStr = formatRelativeTime(note.updatedAt);
+      const isClosed = !!note.closed;
 
       card.innerHTML = `
         <div class="note-card-top">
           <div class="note-card-title-group">
             <span class="theme-pill" style="background-color: ${note.color || '#fef08a'}"></span>
             <span class="note-card-title">${escapeHtml(title)}</span>
+            ${isClosed ? '<span class="status-badge-closed">Closed</span>' : ''}
           </div>
           <div class="note-card-actions">
-            <button class="btn-card-action btn-card-delete" title="Delete note">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <button class="btn-card-action btn-card-delete" title="Delete note permanently">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
           </div>
         </div>
         <div class="note-card-snippet">${escapeHtml(snippet)}</div>
         <div class="note-card-meta">
           <span>${timeStr}</span>
-          <span>Click to focus</span>
+          <span>${isClosed ? 'Click to reopen' : 'Click to focus'}</span>
         </div>
       `;
 
-      // Click card to jump/focus
+      // Click card to jump/reopen
       card.addEventListener('click', async (e) => {
         if (e.target.closest('.btn-card-delete')) return;
+
+        if (isRestrictedPage) {
+          // Open canvas tab with note
+          const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
+          await chrome.tabs.create({ url: canvasUrl });
+          window.close();
+          return;
+        }
+
         try {
-          await sendMessageToContent({ action: 'FOCUS_NOTE', noteId: note.id });
-          window.close(); // Close popup so user sees note highlighted
+          if (note.closed) {
+            await sendMessageToContent({ action: 'REOPEN_NOTE', noteId: note.id });
+          } else {
+            await sendMessageToContent({ action: 'FOCUS_NOTE', noteId: note.id });
+          }
+          window.close();
         } catch (err) {
           console.error('Focus note failed:', err);
         }
@@ -248,8 +291,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       const delBtn = card.querySelector('.btn-card-delete');
       delBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        const confirmDelete = window.confirm('Permanently delete this sticky note?');
+        if (!confirmDelete) return;
+
         try {
-          await sendMessageToContent({ action: 'DELETE_NOTE', noteId: note.id });
+          if (!isRestrictedPage) {
+            await sendMessageToContent({ action: 'DELETE_NOTE', noteId: note.id });
+          } else {
+            allNotes = allNotes.filter(n => n.id !== note.id);
+            await chrome.storage.local.set({ [currentStorageKey]: allNotes });
+          }
           allNotes = allNotes.filter(n => n.id !== note.id);
           renderNotes(getFilteredNotes());
         } catch (err) {
@@ -271,19 +322,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       .replace(/'/g, '&#039;');
   }
 
+  function openCanvasTab() {
+    const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
+    chrome.tabs.create({ url: canvasUrl });
+    window.close();
+  }
+
   // --- Button Handlers ---
 
   // New Note
   btnNewNote.addEventListener('click', async () => {
+    if (isRestrictedPage) {
+      openCanvasTab();
+      return;
+    }
+
     try {
       btnNewNote.disabled = true;
       await sendMessageToContent({ action: 'CREATE_NOTE' });
-      window.close(); // Close popup so user can immediately type into note
+      window.close();
     } catch (err) {
-      console.error('Create note failed:', err);
-      btnNewNote.disabled = false;
+      // If content injection failed, open canvas
+      openCanvasTab();
     }
   });
+
+  // Top Bar Open Canvas Button
+  btnOpenCanvasTop.addEventListener('click', () => {
+    openCanvasTab();
+  });
+
+  // Banner Launch Canvas Button
+  if (btnLaunchCanvas) {
+    btnLaunchCanvas.addEventListener('click', () => {
+      openCanvasTab();
+    });
+  }
 
   // Toggle Visibility
   btnToggleVisibility.addEventListener('click', async () => {
@@ -293,27 +367,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         isNotesVisible = resp.isVisible;
         updateVisibilityIcon();
       }
-    } catch (err) {
-      console.error('Toggle visibility failed:', err);
-    }
+    } catch (err) {}
   });
 
   // Export Notes (Markdown file download)
   btnExport.addEventListener('click', () => {
     if (allNotes.length === 0) {
-      alert('No notes on this page to export.');
+      alert('No notes to export.');
       return;
     }
 
-    let md = `# Sticky Notes for ${activeTab.title || 'Page'}\n`;
-    md += `URL: ${activeTab.url}\n`;
+    let md = `# Sticky Notes Export\n`;
+    md += `URL: ${activeTab?.url || 'Notes Canvas'}\n`;
     md += `Exported: ${new Date().toLocaleString()}\n\n---\n\n`;
 
     allNotes.forEach((n, idx) => {
       const title = n.heading ? n.heading.trim() : `Note #${idx + 1}`;
       const text = htmlToPlainText(n.bodyHtml).trim();
       const updated = new Date(n.updatedAt || Date.now()).toLocaleString();
-      md += `### ${title}\n`;
+      const status = n.closed ? ' [Closed]' : '';
+      md += `### ${title}${status}\n`;
       md += `*Theme: ${n.color || 'Yellow'} | Last Updated: ${updated}*\n\n`;
       md += `${text || '_No content_'}\n\n---\n\n`;
     });
@@ -332,11 +405,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Clear All Notes
   btnClearAll.addEventListener('click', async () => {
     if (allNotes.length === 0) return;
-    const confirm = window.confirm(`Delete all ${allNotes.length} sticky notes on this page?`);
-    if (!confirm) return;
+    const confirmClear = window.confirm(`Permanently delete all ${allNotes.length} notes?`);
+    if (!confirmClear) return;
 
     try {
-      await sendMessageToContent({ action: 'DELETE_ALL_NOTES' });
+      if (!isRestrictedPage) {
+        await sendMessageToContent({ action: 'DELETE_ALL_NOTES' });
+      } else {
+        await chrome.storage.local.set({ [currentStorageKey]: [] });
+      }
       allNotes = [];
       renderNotes([]);
     } catch (err) {
@@ -360,7 +437,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderNotes(allNotes);
     searchInput.focus();
   });
-
-  // Initialize
-  loadNotes();
 });

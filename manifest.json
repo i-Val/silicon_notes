@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Rich Web Sticky Notes",
-  "version": "1.0.0",
-  "description": "Create, format, and persist beautiful rich text sticky notes directly on any webpage.",
+  "version": "1.0.1",
+  "description": "Create, format, and persist beautiful rich text sticky notes directly on any webpage or blank canvas.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -25,7 +25,11 @@
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://localhost/*",
+    "https://localhost/*",
+    "http://127.0.0.1/*",
+    "https://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background/service_worker.js"
@@ -36,7 +40,7 @@
         "default": "Alt+Shift+N",
         "mac": "Command+Shift+N"
       },
-      "description": "Create a new sticky note on the current page"
+      "description": "Create a new sticky note"
     },
     "toggle-notes-visibility": {
       "suggested_key": {
@@ -48,7 +52,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>",
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://127.0.0.1/*",
+        "https://127.0.0.1/*"
+      ],
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
       "js": ["content/content.js"],
       "run_at": "document_idle"
     }

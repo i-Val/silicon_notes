@@ -57,10 +57,23 @@
   const THEME_KEYS = Object.keys(THEMES);
   const DEFAULT_THEME_COLOR = THEMES.yellow.bg;
 
-  // Storage key normalization (ignores volatile query params)
+  // Unified Storage Key Normalization
   function getPageStorageKey() {
     try {
       const loc = window.location;
+      // Handle extension Canvas Workspace
+      if (loc.protocol === 'chrome-extension:' && loc.pathname.includes('canvas')) {
+        return 'notes:canvas_workspace';
+      }
+      // Handle about:blank
+      if (loc.protocol === 'about:' || loc.href === 'about:blank') {
+        return 'notes:about_blank';
+      }
+      // Handle file:// (in Chrome loc.origin is "null" for file:)
+      if (loc.protocol === 'file:') {
+        return `notes:file_${loc.pathname}`;
+      }
+      // Handle localhost and normal web pages
       return `notes:${loc.origin}${loc.pathname}`;
     } catch {
       return `notes:${window.location.href}`;
@@ -79,7 +92,7 @@
     });
   }
 
-  // --- HTML Sanitization (Whitelist only safe tags, strip ALL attributes) ---
+  // --- HTML Sanitization (Whitelist safe tags, strip ALL attributes) ---
   const ALLOWED_TAGS = new Set([
     'B', 'STRONG', 'I', 'EM', 'U', 'S',
     'UL', 'OL', 'LI', 'CODE', 'BR', 'DIV', 'P'
@@ -109,7 +122,6 @@
             }
             return cleanEl;
           } else {
-            // Tag is not in whitelist; unpack its sanitized children into a fragment
             const fragment = document.createDocumentFragment();
             for (const child of Array.from(node.childNodes)) {
               const cleanedChild = cleanNode(child);
@@ -150,7 +162,8 @@
     palette: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>`,
     collapse: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
     expand: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    close: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+    close: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+    trash: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
     bold: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>`,
     italic: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>`,
     underline: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>`,
@@ -187,7 +200,7 @@
     }
 
     .sticky-notes-container {
-      position: absolute;
+      position: fixed;
       top: 0;
       left: 0;
       width: 100vw;
@@ -195,6 +208,7 @@
       pointer-events: none;
       overflow: visible;
       transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 2147483640;
     }
 
     .sticky-notes-container.is-hidden {
@@ -216,7 +230,7 @@
       min-width: 240px;
       min-height: 200px;
       overflow: hidden;
-      transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.15s ease;
+      transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.15s ease, opacity 0.18s ease;
     }
 
     .sticky-note:focus-within {
@@ -303,7 +317,7 @@
     .header-right {
       display: flex;
       align-items: center;
-      gap: 3px;
+      gap: 2px;
     }
 
     /* Action Buttons in Header */
@@ -339,11 +353,16 @@
       opacity: 1;
     }
 
+    .btn-header.btn-close:hover {
+      background-color: rgba(24, 24, 27, 0.16);
+      opacity: 1;
+    }
+
     /* Color Palette Popover */
     .palette-popover {
       position: absolute;
       top: 36px;
-      right: 40px;
+      right: 36px;
       background: #ffffff;
       border-radius: 8px;
       padding: 6px;
@@ -483,7 +502,6 @@
       display: block;
     }
 
-    /* Rich text elements inside body */
     .note-body b, .note-body strong {
       font-weight: 700;
     }
@@ -526,13 +544,8 @@
       border: 1px solid rgba(24, 24, 27, 0.1);
     }
 
-    /* Scrollbars for note body */
     .note-body::-webkit-scrollbar {
       width: 5px;
-    }
-
-    .note-body::-webkit-scrollbar-track {
-      background: transparent;
     }
 
     .note-body::-webkit-scrollbar-thumb {
@@ -568,7 +581,8 @@
   // --- Sticky Note Manager ---
   class StickyNotesApp {
     constructor() {
-      this.notes = new Map(); // id -> NoteController
+      this.notesMap = new Map(); // id -> NoteData (all notes on this page, including closed)
+      this.controllers = new Map(); // id -> NoteController (active DOM controllers on page)
       this.highestZIndex = 2147483641;
       this.storageKey = getPageStorageKey();
       this.container = null;
@@ -588,9 +602,12 @@
 
       const host = document.createElement('div');
       host.id = 'rich-web-sticky-notes-root';
+      // Inline styles with !important guarantee host page styles (like Tailwind resets) NEVER hide or misplace it
+      host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; pointer-events: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important;';
+
       this.shadowRoot = host.attachShadow({ mode: 'open' });
 
-      // Inject Styles
+      // Inject Isolated Styles
       const styleEl = document.createElement('style');
       styleEl.textContent = SHADOW_STYLES;
       this.shadowRoot.appendChild(styleEl);
@@ -600,8 +617,15 @@
       this.container.className = 'sticky-notes-container';
       this.shadowRoot.appendChild(this.container);
 
-      // Append host to DOM
-      (document.body || document.documentElement).appendChild(host);
+      // Append host to DOM safely
+      const target = document.body || document.documentElement;
+      if (target) {
+        target.appendChild(host);
+      } else {
+        document.addEventListener('DOMContentLoaded', () => {
+          (document.body || document.documentElement).appendChild(host);
+        });
+      }
     }
 
     async loadNotes() {
@@ -609,14 +633,19 @@
         const data = await chrome.storage.local.get(this.storageKey);
         const storedList = Array.isArray(data[this.storageKey]) ? data[this.storageKey] : [];
 
-        // Clear existing controllers
+        // Clear existing controllers and data
         this.container.innerHTML = '';
-        this.notes.clear();
+        this.controllers.clear();
+        this.notesMap.clear();
 
         for (const item of storedList) {
-          const controller = new NoteController(this, item);
-          this.notes.set(item.id, controller);
-          this.container.appendChild(controller.element);
+          this.notesMap.set(item.id, item);
+          // Only render controller on page if not marked closed
+          if (!item.closed) {
+            const controller = new NoteController(this, item);
+            this.controllers.set(item.id, controller);
+            this.container.appendChild(controller.element);
+          }
         }
 
         this.notifyBadgeUpdate();
@@ -626,15 +655,13 @@
     }
 
     createNote(overrides = {}) {
-      // Calculate stagger offset so notes don't overlap completely
-      const count = this.notes.size;
-      const baseOffset = 40 + (count % 8) * 30;
+      const activeCount = this.controllers.size;
+      const baseOffset = 40 + (activeCount % 8) * 30;
 
-      // Center-ish placement clamped to viewport
       const defaultWidth = 260;
       const defaultHeight = 240;
-      const maxX = Math.max(20, window.innerWidth - defaultWidth - 40);
-      const maxY = Math.max(20, window.innerHeight - defaultHeight - 40);
+      const maxX = Math.max(20, (window.innerWidth || 800) - defaultWidth - 40);
+      const maxY = Math.max(20, (window.innerHeight || 600) - defaultHeight - 40);
 
       const targetX = Math.min(Math.max(30, 60 + baseOffset), maxX);
       const targetY = Math.min(Math.max(30, 80 + baseOffset), maxY);
@@ -649,39 +676,105 @@
         width: overrides.width ?? defaultWidth,
         height: overrides.height ?? defaultHeight,
         collapsed: overrides.collapsed ?? false,
+        closed: false,
         updatedAt: Date.now()
       };
 
+      this.notesMap.set(newNoteData.id, newNoteData);
       const controller = new NoteController(this, newNoteData);
-      this.notes.set(newNoteData.id, controller);
+      this.controllers.set(newNoteData.id, controller);
       this.container.appendChild(controller.element);
 
-      // Focus new note heading
       this.bringToFront(controller);
       setTimeout(() => controller.focusHeading(), 50);
 
-      this.scheduleSave();
+      this.persistNow();
       this.notifyBadgeUpdate();
       return controller;
     }
 
+    // Close note: stashes it from the page, but PRESERVES IT in storage and in popup list!
+    closeNote(id) {
+      const controller = this.controllers.get(id);
+      const data = this.notesMap.get(id);
+      if (!data) return;
+
+      // Update data state
+      data.closed = true;
+      data.updatedAt = Date.now();
+      if (controller) {
+        const latest = controller.getData();
+        Object.assign(data, latest, { closed: true });
+      }
+
+      if (controller) {
+        controller.element.style.transform = 'scale(0.85)';
+        controller.element.style.opacity = '0';
+        setTimeout(() => {
+          controller.destroy();
+          if (controller.element.parentNode) {
+            controller.element.parentNode.removeChild(controller.element);
+          }
+          this.controllers.delete(id);
+        }, 180);
+      }
+
+      this.persistNow();
+      this.notifyBadgeUpdate();
+    }
+
+    // Reopen closed note back onto the page
+    reopenNote(id) {
+      let data = this.notesMap.get(id);
+      if (!data) return false;
+
+      data.closed = false;
+      data.updatedAt = Date.now();
+
+      let controller = this.controllers.get(id);
+      if (!controller) {
+        controller = new NoteController(this, data);
+        this.controllers.set(id, controller);
+        this.container.appendChild(controller.element);
+      }
+
+      controller.element.style.display = 'flex';
+      controller.element.style.opacity = '1';
+      controller.element.style.transform = 'scale(1)';
+
+      this.bringToFront(controller);
+      controller.clampToViewport();
+
+      // Trigger pulse highlight
+      controller.element.classList.remove('highlight-pulse');
+      void controller.element.offsetWidth;
+      controller.element.classList.add('highlight-pulse');
+
+      controller.focusBody();
+      this.persistNow();
+      this.notifyBadgeUpdate();
+      return true;
+    }
+
+    // Permanent deletion
     deleteNote(id) {
-      const controller = this.notes.get(id);
-      if (!controller) return;
+      const controller = this.controllers.get(id);
+      this.notesMap.delete(id);
 
-      controller.element.style.transform = 'scale(0.85)';
-      controller.element.style.opacity = '0';
-      controller.element.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+      if (controller) {
+        controller.element.style.transform = 'scale(0.8)';
+        controller.element.style.opacity = '0';
+        setTimeout(() => {
+          controller.destroy();
+          if (controller.element.parentNode) {
+            controller.element.parentNode.removeChild(controller.element);
+          }
+          this.controllers.delete(id);
+        }, 180);
+      }
 
-      setTimeout(() => {
-        controller.destroy();
-        this.notes.delete(id);
-        if (controller.element.parentNode) {
-          controller.element.parentNode.removeChild(controller.element);
-        }
-        this.scheduleSave();
-        this.notifyBadgeUpdate();
-      }, 180);
+      this.persistNow();
+      this.notifyBadgeUpdate();
     }
 
     bringToFront(controller) {
@@ -696,25 +789,32 @@
       }, 250);
     }
 
-    async persistNow() {
-      try {
-        const list = Array.from(this.notes.values()).map(c => c.getData());
-        await chrome.storage.local.set({ [this.storageKey]: list });
-        this.notifyBadgeUpdate();
-      } catch (err) {
-        console.error('Failed to save sticky notes:', err);
+    // Save immediately and synchronously to ensure zero loss
+    persistNow() {
+      clearTimeout(this.saveDebounceTimer);
+      // Synchronize latest data from active controllers into notesMap
+      for (const [id, controller] of this.controllers.entries()) {
+        if (this.notesMap.has(id)) {
+          const fresh = controller.getData();
+          this.notesMap.set(id, fresh);
+        }
       }
+
+      const list = Array.from(this.notesMap.values());
+      chrome.storage.local.set({ [this.storageKey]: list }).catch(err => {
+        console.error('Failed to persist sticky notes:', err);
+      });
+      this.notifyBadgeUpdate();
     }
 
     notifyBadgeUpdate() {
       try {
+        const openNotesCount = Array.from(this.notesMap.values()).filter(n => !n.closed).length;
         chrome.runtime.sendMessage({
           action: 'UPDATE_BADGE_COUNT',
-          count: this.notes.size
+          count: openNotesCount
         }).catch(() => {});
-      } catch (e) {
-        // Context might be invalidated
-      }
+      } catch (e) {}
     }
 
     toggleVisibility() {
@@ -728,31 +828,24 @@
     }
 
     focusNoteById(id) {
-      const controller = this.notes.get(id);
-      if (!controller) return false;
+      let data = this.notesMap.get(id);
+      if (!data) return false;
 
+      // If closed, reopen it
+      if (data.closed || !this.controllers.has(id)) {
+        return this.reopenNote(id);
+      }
+
+      const controller = this.controllers.get(id);
       if (!this.isVisible) {
         this.toggleVisibility();
       }
 
       this.bringToFront(controller);
+      controller.clampToViewport();
 
-      // Scroll note into viewport if outside
-      const rect = controller.element.getBoundingClientRect();
-      const isOutside = (
-        rect.top < 0 ||
-        rect.left < 0 ||
-        rect.bottom > window.innerHeight ||
-        rect.right > window.innerWidth
-      );
-
-      if (isOutside) {
-        controller.repositionInsideViewport();
-      }
-
-      // Highlight animation
       controller.element.classList.remove('highlight-pulse');
-      void controller.element.offsetWidth; // Trigger reflow
+      void controller.element.offsetWidth;
       controller.element.classList.add('highlight-pulse');
 
       controller.focusBody();
@@ -760,19 +853,31 @@
     }
 
     setupListeners() {
-      // Runtime message handler (from popup or background)
+      // Runtime message handler (from popup, background, or canvas)
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'CREATE_NOTE') {
           const note = this.createNote(message.noteData || {});
           sendResponse({ ok: true, noteId: note.data.id });
         } else if (message.action === 'GET_NOTES') {
-          const list = Array.from(this.notes.values()).map(c => c.getData());
+          // Flush active controller inputs
+          for (const [id, controller] of this.controllers.entries()) {
+            if (this.notesMap.has(id)) {
+              this.notesMap.set(id, controller.getData());
+            }
+          }
+          const list = Array.from(this.notesMap.values());
           sendResponse({ ok: true, notes: list, isVisible: this.isVisible });
+        } else if (message.action === 'CLOSE_NOTE') {
+          this.closeNote(message.noteId);
+          sendResponse({ ok: true });
+        } else if (message.action === 'REOPEN_NOTE') {
+          const success = this.reopenNote(message.noteId);
+          sendResponse({ ok: success });
         } else if (message.action === 'DELETE_NOTE') {
           this.deleteNote(message.noteId);
           sendResponse({ ok: true });
         } else if (message.action === 'DELETE_ALL_NOTES') {
-          for (const id of Array.from(this.notes.keys())) {
+          for (const id of Array.from(this.notesMap.keys())) {
             this.deleteNote(id);
           }
           sendResponse({ ok: true });
@@ -786,6 +891,13 @@
         return true;
       });
 
+      // Canvas internal message listener
+      window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'CANVAS_CREATE_NOTE') {
+          this.createNote();
+        }
+      });
+
       // Multi-tab storage sync
       chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== 'local') return;
@@ -795,14 +907,18 @@
         }
       });
 
-      // Window resize clamping
+      // Viewport resize clamping
       window.addEventListener('resize', () => {
-        for (const controller of this.notes.values()) {
+        for (const controller of this.controllers.values()) {
           controller.clampToViewport();
         }
       });
 
-      // Handle SPA route changes (popstate & pushState monkey patching)
+      // Immediate save on page unload or visibility hide to guarantee zero data loss
+      window.addEventListener('beforeunload', () => this.persistNow());
+      window.addEventListener('pagehide', () => this.persistNow());
+
+      // Handle SPA route changes
       window.addEventListener('popstate', () => this.checkUrlChange());
       const originalPushState = history.pushState;
       history.pushState = (...args) => {
@@ -819,6 +935,7 @@
     checkUrlChange() {
       const currentKey = getPageStorageKey();
       if (currentKey !== this.storageKey) {
+        this.persistNow();
         this.storageKey = currentKey;
         this.loadNotes();
       }
@@ -826,29 +943,32 @@
 
     reconcileStorageChange(newList) {
       const newMap = new Map(newList.map(n => [n.id, n]));
+      this.notesMap = newMap;
 
-      // Remove deleted notes
-      for (const [id, controller] of this.notes.entries()) {
-        if (!newMap.has(id)) {
+      // Remove deleted notes or closed notes from DOM
+      for (const [id, controller] of this.controllers.entries()) {
+        const updated = newMap.get(id);
+        if (!updated || updated.closed) {
           controller.destroy();
           if (controller.element.parentNode) {
             controller.element.parentNode.removeChild(controller.element);
           }
-          this.notes.delete(id);
+          this.controllers.delete(id);
         }
       }
 
-      // Add or update notes
+      // Add or update open notes
       for (const item of newList) {
-        if (this.notes.has(item.id)) {
-          const controller = this.notes.get(item.id);
-          // Only update if not currently focused by user
+        if (item.closed) continue;
+
+        if (this.controllers.has(item.id)) {
+          const controller = this.controllers.get(item.id);
           if (!controller.isFocused()) {
             controller.updateFromData(item);
           }
         } else {
           const controller = new NoteController(this, item);
-          this.notes.set(item.id, controller);
+          this.controllers.set(item.id, controller);
           this.container.appendChild(controller.element);
         }
       }
@@ -871,6 +991,7 @@
         width: Math.max(240, data.width ?? 260),
         height: Math.max(200, data.height ?? 240),
         collapsed: !!data.collapsed,
+        closed: !!data.closed,
         updatedAt: data.updatedAt || Date.now()
       };
 
@@ -882,7 +1003,6 @@
       this.resizerEl = null;
       this.palettePopover = null;
 
-      this.resizeObserver = null;
       this.isDragging = false;
       this.isResizing = false;
 
@@ -901,6 +1021,7 @@
         width: Math.round(this.data.width),
         height: Math.round(this.data.height),
         collapsed: this.data.collapsed,
+        closed: this.data.closed,
         updatedAt: this.data.updatedAt
       };
     }
@@ -922,6 +1043,7 @@
       this.data.width = Math.max(240, newData.width ?? this.data.width);
       this.data.height = Math.max(200, newData.height ?? this.data.height);
       this.data.collapsed = !!newData.collapsed;
+      this.data.closed = !!newData.closed;
       this.data.updatedAt = newData.updatedAt || Date.now();
 
       this.applyTheme(this.data.color);
@@ -938,8 +1060,6 @@
     }
 
     render() {
-      const theme = getThemeByColor(this.data.color);
-
       // Root Note Element
       this.element = document.createElement('div');
       this.element.className = 'sticky-note';
@@ -960,7 +1080,8 @@
           <button class="btn-header btn-collapse" title="${this.data.collapsed ? 'Expand note' : 'Collapse note'}">
             ${this.data.collapsed ? ICONS.expand : ICONS.collapse}
           </button>
-          <button class="btn-header btn-delete" title="Delete note">${ICONS.close}</button>
+          <button class="btn-header btn-close" title="Close note (saved in popup, does not delete)">${ICONS.close}</button>
+          <button class="btn-header btn-delete" title="Delete note permanently">${ICONS.trash}</button>
         </div>
       `;
 
@@ -1058,16 +1179,7 @@
       this.data.collapsed = !this.data.collapsed;
       this.data.updatedAt = Date.now();
       this.applyCollapsedState();
-      this.app.scheduleSave();
-    }
-
-    cycleTheme() {
-      const currentIndex = THEME_KEYS.findIndex(k => THEMES[k].bg === this.data.color);
-      const nextIndex = (currentIndex + 1) % THEME_KEYS.length;
-      const nextTheme = THEMES[THEME_KEYS[nextIndex]];
-      this.applyTheme(nextTheme.bg);
-      this.data.updatedAt = Date.now();
-      this.app.scheduleSave();
+      this.app.persistNow();
     }
 
     showPalettePopover() {
@@ -1091,7 +1203,7 @@
           e.stopPropagation();
           this.applyTheme(theme.bg);
           this.data.updatedAt = Date.now();
-          this.app.scheduleSave();
+          this.app.persistNow();
           this.palettePopover.remove();
           this.palettePopover = null;
         });
@@ -1101,7 +1213,6 @@
 
       this.element.appendChild(this.palettePopover);
 
-      // Auto-dismiss on click outside
       const dismissHandler = (e) => {
         if (this.palettePopover && !this.palettePopover.contains(e.target)) {
           this.palettePopover.remove();
@@ -1128,54 +1239,65 @@
     }
 
     clampToViewport() {
-      const maxX = Math.max(0, window.innerWidth - this.data.width);
-      const maxY = Math.max(0, window.innerHeight - (this.data.collapsed ? 80 : this.data.height));
+      const w = window.innerWidth || 800;
+      const h = window.innerHeight || 600;
+      const maxX = Math.max(0, w - this.data.width);
+      const currentHeight = this.data.collapsed ? 80 : this.data.height;
+      const maxY = Math.max(0, h - currentHeight);
 
       this.data.x = Math.min(Math.max(0, this.data.x), maxX);
       this.data.y = Math.min(Math.max(0, this.data.y), maxY);
       this.applyPosition();
     }
 
-    repositionInsideViewport() {
-      this.clampToViewport();
-    }
-
     bindEvents() {
-      // Bring note to front on click / focus
       this.element.addEventListener('pointerdown', () => {
         this.app.bringToFront(this);
       });
 
-      // --- Header Buttons ---
+      // Palette trigger
       const paletteBtn = this.headerEl.querySelector('.btn-palette');
       paletteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.showPalettePopover();
       });
 
+      // Collapse trigger
       const collapseBtn = this.headerEl.querySelector('.btn-collapse');
       collapseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleCollapse();
       });
 
+      // Close trigger (stashes note, leaves persisted)
+      const closeBtn = this.headerEl.querySelector('.btn-close');
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.app.closeNote(this.data.id);
+      });
+
+      // Delete trigger (permanent deletion)
       const deleteBtn = this.headerEl.querySelector('.btn-delete');
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.app.deleteNote(this.data.id);
       });
 
-      // --- Header Dragging ---
+      // Dragging
       this.setupDragging();
 
-      // --- Corner Resizing ---
+      // Resizing
       this.setupResizing();
 
-      // --- Heading Input Events ---
+      // Heading Input
       this.headingInput.addEventListener('input', () => {
         this.data.heading = this.headingInput.value;
         this.data.updatedAt = Date.now();
         this.app.scheduleSave();
+      });
+
+      this.headingInput.addEventListener('blur', () => {
+        this.app.persistNow();
       });
 
       this.headingInput.addEventListener('keydown', (e) => {
@@ -1185,10 +1307,10 @@
         }
       });
 
-      // --- Formatting Toolbar Buttons ---
+      // Toolbar
       this.setupToolbar();
 
-      // --- Editor Body Events ---
+      // Editor
       this.setupEditor();
     }
 
@@ -1206,9 +1328,11 @@
         let newX = initialLeft + deltaX;
         let newY = initialTop + deltaY;
 
-        const maxX = Math.max(0, window.innerWidth - this.data.width);
+        const w = window.innerWidth || 800;
+        const h = window.innerHeight || 600;
+        const maxX = Math.max(0, w - this.data.width);
         const currentHeight = this.data.collapsed ? this.element.offsetHeight : this.data.height;
-        const maxY = Math.max(0, window.innerHeight - currentHeight);
+        const maxY = Math.max(0, h - currentHeight);
 
         newX = Math.min(Math.max(0, newX), maxX);
         newY = Math.min(Math.max(0, newY), maxY);
@@ -1231,11 +1355,10 @@
         window.removeEventListener('pointerup', onPointerUp);
 
         this.data.updatedAt = Date.now();
-        this.app.scheduleSave();
+        this.app.persistNow();
       };
 
       this.headerEl.addEventListener('pointerdown', (e) => {
-        // Only drag from primary click and not from button clicks
         if (e.button !== 0 || e.target.closest('.btn-header') || e.target.closest('.palette-popover')) {
           return;
         }
@@ -1269,8 +1392,10 @@
         const deltaX = e.clientX - startX;
         const deltaY = e.clientY - startY;
 
-        const maxW = window.innerWidth - this.data.x - 10;
-        const maxH = window.innerHeight - this.data.y - 10;
+        const w = window.innerWidth || 800;
+        const h = window.innerHeight || 600;
+        const maxW = w - this.data.x - 10;
+        const maxH = h - this.data.y - 10;
 
         const newW = Math.min(Math.max(240, initialW + deltaX), Math.max(240, maxW));
         const newH = Math.min(Math.max(200, initialH + deltaY), Math.max(200, maxH));
@@ -1292,7 +1417,7 @@
         window.removeEventListener('pointerup', onPointerUp);
 
         this.data.updatedAt = Date.now();
-        this.app.scheduleSave();
+        this.app.persistNow();
       };
 
       this.resizerEl.addEventListener('pointerdown', (e) => {
@@ -1319,7 +1444,6 @@
       const toolButtons = this.toolbarEl.querySelectorAll('.btn-tool');
 
       toolButtons.forEach((btn) => {
-        // Focus preservation: Prevent mousedown from stealing focus or collapsing selection
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
         });
@@ -1348,10 +1472,8 @@
       if (!sel || sel.rangeCount === 0) return;
       const range = sel.getRangeAt(0);
 
-      // Verify caret is inside this note's body
       if (!this.bodyEl.contains(range.commonAncestorContainer)) return;
 
-      // Check if already inside a <code> tag
       let node = range.commonAncestorContainer;
       let codeNode = null;
       while (node && node !== this.bodyEl) {
@@ -1363,17 +1485,15 @@
       }
 
       if (codeNode) {
-        // Unwrap code element
         const parent = codeNode.parentNode;
         while (codeNode.firstChild) {
           parent.insertBefore(codeNode.firstChild, codeNode);
         }
         parent.removeChild(codeNode);
       } else {
-        // Wrap selection in <code>
         if (range.collapsed) {
           const codeEl = document.createElement('code');
-          codeEl.innerHTML = '&#8203;'; // zero-width space placeholder
+          codeEl.innerHTML = '&#8203;';
           range.insertNode(codeEl);
           range.selectNodeContents(codeEl);
           sel.removeAllRanges();
@@ -1423,7 +1543,6 @@
     }
 
     setupEditor() {
-      // Reflection on selection change, keyup, mouseup
       const onSelectionOrCaretMove = () => {
         this.updateToolbarActiveStates();
       };
@@ -1432,12 +1551,14 @@
       this.bodyEl.addEventListener('mouseup', onSelectionOrCaretMove);
       document.addEventListener('selectionchange', onSelectionOrCaretMove);
 
-      // Input changes
       this.bodyEl.addEventListener('input', () => {
         this.handleBodyChange();
       });
 
-      // Paste Sanitization: strip external styles, classes, scripts
+      this.bodyEl.addEventListener('blur', () => {
+        this.app.persistNow();
+      });
+
       this.bodyEl.addEventListener('paste', (e) => {
         e.preventDefault();
         const clipboard = e.clipboardData || window.clipboardData;
@@ -1460,7 +1581,6 @@
         this.handleBodyChange();
       });
 
-      // Keyboard shortcuts inside editor (Ctrl/Cmd + B, I, U)
       this.bodyEl.addEventListener('keydown', (e) => {
         const isMod = e.ctrlKey || e.metaKey;
         if (isMod) {
@@ -1491,9 +1611,6 @@
     }
 
     destroy() {
-      if (this.resizeObserver) {
-        this.resizeObserver.disconnect();
-      }
       if (this.palettePopover) {
         this.palettePopover.remove();
       }
