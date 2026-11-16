@@ -162,7 +162,7 @@
       height: 0;
       z-index: 2147483640;
       pointer-events: none;
-      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 14px;
       line-height: 1.5;
       color: #18181b;
@@ -689,8 +689,56 @@
 
       this.shadowRoot = host.attachShadow({ mode: 'open' });
 
+      let fontFaces = '';
+      try {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+          const p400 = chrome.runtime.getURL('fonts/poppins-400.woff2');
+          const p500 = chrome.runtime.getURL('fonts/poppins-500.woff2');
+          const p600 = chrome.runtime.getURL('fonts/poppins-600.woff2');
+          const p700 = chrome.runtime.getURL('fonts/poppins-700.woff2');
+          const pItalic = chrome.runtime.getURL('fonts/poppins-italic.woff2');
+          fontFaces = `
+            @font-face {
+              font-family: 'Poppins';
+              font-style: normal;
+              font-weight: 400;
+              font-display: swap;
+              src: local('Poppins'), local('Poppins Regular'), url('${p400}') format('woff2');
+            }
+            @font-face {
+              font-family: 'Poppins';
+              font-style: normal;
+              font-weight: 500;
+              font-display: swap;
+              src: local('Poppins Medium'), url('${p500}') format('woff2');
+            }
+            @font-face {
+              font-family: 'Poppins';
+              font-style: normal;
+              font-weight: 600;
+              font-display: swap;
+              src: local('Poppins SemiBold'), url('${p600}') format('woff2');
+            }
+            @font-face {
+              font-family: 'Poppins';
+              font-style: normal;
+              font-weight: 700;
+              font-display: swap;
+              src: local('Poppins Bold'), url('${p700}') format('woff2');
+            }
+            @font-face {
+              font-family: 'Poppins';
+              font-style: italic;
+              font-weight: 400;
+              font-display: swap;
+              src: local('Poppins Italic'), url('${pItalic}') format('woff2');
+            }
+          `;
+        }
+      } catch (e) {}
+
       const styleEl = document.createElement('style');
-      styleEl.textContent = SHADOW_STYLES;
+      styleEl.textContent = fontFaces + '\n' + SHADOW_STYLES;
       this.shadowRoot.appendChild(styleEl);
 
       this.container = document.createElement('div');
