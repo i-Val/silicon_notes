@@ -162,7 +162,7 @@
       height: 0;
       z-index: 2147483640;
       pointer-events: none;
-      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
       font-size: 14px;
       line-height: 1.5;
       color: #18181b;
@@ -174,6 +174,28 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+
+    .sticky-notes-container,
+    .sticky-note,
+    .sticky-note *,
+    .note-heading-input,
+    .note-body,
+    .btn-header,
+    .btn-format,
+    .palette-popover,
+    .palette-popover *,
+    .confirm-overlay,
+    .confirm-modal,
+    .confirm-modal * {
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    }
+
+    .sticky-note code,
+    .sticky-note pre,
+    .note-body code,
+    .note-body pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
     }
 
     .sticky-notes-container {
@@ -685,60 +707,24 @@
 
       const host = document.createElement('div');
       host.id = 'rich-web-sticky-notes-root';
-      host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; pointer-events: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important;';
+      host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; pointer-events: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important; font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;';
 
       this.shadowRoot = host.attachShadow({ mode: 'open' });
 
-      let fontFaces = '';
-      try {
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
-          const p400 = chrome.runtime.getURL('fonts/poppins-400.woff2');
-          const p500 = chrome.runtime.getURL('fonts/poppins-500.woff2');
-          const p600 = chrome.runtime.getURL('fonts/poppins-600.woff2');
-          const p700 = chrome.runtime.getURL('fonts/poppins-700.woff2');
-          const pItalic = chrome.runtime.getURL('fonts/poppins-italic.woff2');
-          fontFaces = `
-            @font-face {
-              font-family: 'Poppins';
-              font-style: normal;
-              font-weight: 400;
-              font-display: swap;
-              src: local('Poppins'), local('Poppins Regular'), url('${p400}') format('woff2');
-            }
-            @font-face {
-              font-family: 'Poppins';
-              font-style: normal;
-              font-weight: 500;
-              font-display: swap;
-              src: local('Poppins Medium'), url('${p500}') format('woff2');
-            }
-            @font-face {
-              font-family: 'Poppins';
-              font-style: normal;
-              font-weight: 600;
-              font-display: swap;
-              src: local('Poppins SemiBold'), url('${p600}') format('woff2');
-            }
-            @font-face {
-              font-family: 'Poppins';
-              font-style: normal;
-              font-weight: 700;
-              font-display: swap;
-              src: local('Poppins Bold'), url('${p700}') format('woff2');
-            }
-            @font-face {
-              font-family: 'Poppins';
-              font-style: italic;
-              font-weight: 400;
-              font-display: swap;
-              src: local('Poppins Italic'), url('${pItalic}') format('woff2');
-            }
-          `;
-        }
-      } catch (e) {}
+      // Ensure global @font-face is in document head
+      if (typeof document !== 'undefined' && !document.getElementById('rich-web-sticky-notes-global-fonts')) {
+        try {
+          const globalStyle = document.createElement('style');
+          globalStyle.id = 'rich-web-sticky-notes-global-fonts';
+          if (window.__richStickyNotesFontCss) {
+            globalStyle.textContent = window.__richStickyNotesFontCss;
+          }
+          (document.head || document.documentElement).appendChild(globalStyle);
+        } catch (e) {}
+      }
 
       const styleEl = document.createElement('style');
-      styleEl.textContent = fontFaces + '\n' + SHADOW_STYLES;
+      styleEl.textContent = (window.__richStickyNotesFontCss || '') + '\n' + SHADOW_STYLES;
       this.shadowRoot.appendChild(styleEl);
 
       this.container = document.createElement('div');

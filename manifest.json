@@ -61,7 +61,10 @@
       ],
       "match_about_blank": true,
       "match_origin_as_fallback": true,
-      "js": ["content/content.js"],
+      "js": [
+        "content/fonts.js",
+        "content/content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
