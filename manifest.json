@@ -59,8 +59,8 @@
         "http://127.0.0.1/*",
         "https://127.0.0.1/*"
       ],
+      "all_frames": false,
       "match_about_blank": true,
-      "match_origin_as_fallback": true,
       "js": [
         "content/fonts.js",
         "content/content.js"

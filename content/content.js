@@ -5,6 +5,15 @@
  */
 
 (() => {
+  // Only run in the top-level browsing context (ignore iframes, sandboxed engines, workers)
+  try {
+    if (window.self !== window.top) {
+      return;
+    }
+  } catch (e) {
+    return;
+  }
+
   // Guard against multiple injections
   if (window.__RICH_WEB_STICKY_NOTES_INITIALIZED__) {
     return;
@@ -13,6 +22,46 @@
 
   // --- Constants & Color Themes ---
   const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+
+  // --- Safe Storage & Extension Context Validation ---
+  function isExtensionValid() {
+    try {
+      return typeof chrome !== 'undefined' &&
+             Boolean(chrome?.runtime?.id) &&
+             Boolean(chrome?.storage?.local);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function safeStorageGet(key = null) {
+    if (!isExtensionValid()) return {};
+    try {
+      return await chrome.storage.local.get(key);
+    } catch (e) {
+      return {};
+    }
+  }
+
+  async function safeStorageSet(data) {
+    if (!isExtensionValid()) return false;
+    try {
+      await chrome.storage.local.set(data);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function safeStorageRemove(keys) {
+    if (!isExtensionValid()) return false;
+    try {
+      await chrome.storage.local.remove(keys);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
   const THEMES = {
     yellow: {
@@ -742,8 +791,9 @@
     }
 
     async loadNotesWithMigration() {
+      if (!isExtensionValid()) return;
       try {
-        const allData = await chrome.storage.local.get(null);
+        const allData = await safeStorageGet(null);
         let globalList = Array.isArray(allData[this.storageKey]) ? allData[this.storageKey] : [];
 
         // Check legacy keys
@@ -764,8 +814,8 @@
             }
           }
           if (migrated) {
-            await chrome.storage.local.set({ [this.storageKey]: globalList });
-            await chrome.storage.local.remove(legacyKeys).catch(() => {});
+            await safeStorageSet({ [this.storageKey]: globalList });
+            await safeStorageRemove(legacyKeys);
           }
         }
 
@@ -975,6 +1025,8 @@
 
     persistNow() {
       clearTimeout(this.saveDebounceTimer);
+      if (!isExtensionValid()) return;
+
       for (const [id, controller] of this.controllers.entries()) {
         if (this.notesMap.has(id)) {
           this.notesMap.set(id, controller.getData());
@@ -982,19 +1034,22 @@
       }
 
       const list = Array.from(this.notesMap.values());
-      chrome.storage.local.set({ [this.storageKey]: list }).catch(err => {
+      safeStorageSet({ [this.storageKey]: list }).catch(err => {
         console.error('Failed to persist global sticky notes:', err);
       });
       this.notifyBadgeUpdate();
     }
 
     notifyBadgeUpdate() {
+      if (!isExtensionValid()) return;
       try {
         const activeCount = Array.from(this.notesMap.values()).filter(n => !n.closed).length;
-        chrome.runtime.sendMessage({
-          action: 'UPDATE_BADGE_COUNT',
-          count: activeCount
-        }).catch(() => {});
+        if (chrome?.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'UPDATE_BADGE_COUNT',
+            count: activeCount
+          }).catch(() => {});
+        }
       } catch (e) {}
     }
 
@@ -1009,38 +1064,40 @@
     }
 
     setupListeners() {
-      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.action === 'CREATE_NOTE') {
-          const note = this.createNote(message.noteData || {});
-          sendResponse({ ok: true, noteId: note.data.id });
-        } else if (message.action === 'GET_NOTES') {
-          for (const [id, controller] of this.controllers.entries()) {
-            if (this.notesMap.has(id)) {
-              this.notesMap.set(id, controller.getData());
+      if (isExtensionValid() && chrome?.runtime?.onMessage) {
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+          if (message.action === 'CREATE_NOTE') {
+            const note = this.createNote(message.noteData || {});
+            sendResponse({ ok: true, noteId: note.data.id });
+          } else if (message.action === 'GET_NOTES') {
+            for (const [id, controller] of this.controllers.entries()) {
+              if (this.notesMap.has(id)) {
+                this.notesMap.set(id, controller.getData());
+              }
             }
+            const list = Array.from(this.notesMap.values());
+            sendResponse({ ok: true, notes: list, isVisible: this.isVisible });
+          } else if (message.action === 'CLOSE_NOTE') {
+            this.closeNote(message.noteId);
+            sendResponse({ ok: true });
+          } else if (message.action === 'OPEN_ONLY_NOTE' || message.action === 'REOPEN_NOTE' || message.action === 'FOCUS_NOTE') {
+            const success = this.openOnlyNote(message.noteId);
+            sendResponse({ ok: success });
+          } else if (message.action === 'DELETE_NOTE') {
+            this.deleteNote(message.noteId);
+            sendResponse({ ok: true });
+          } else if (message.action === 'DELETE_ALL_NOTES') {
+            for (const id of Array.from(this.notesMap.keys())) {
+              this.deleteNote(id);
+            }
+            sendResponse({ ok: true });
+          } else if (message.action === 'TOGGLE_VISIBILITY') {
+            const visible = this.toggleVisibility();
+            sendResponse({ ok: true, isVisible: visible });
           }
-          const list = Array.from(this.notesMap.values());
-          sendResponse({ ok: true, notes: list, isVisible: this.isVisible });
-        } else if (message.action === 'CLOSE_NOTE') {
-          this.closeNote(message.noteId);
-          sendResponse({ ok: true });
-        } else if (message.action === 'OPEN_ONLY_NOTE' || message.action === 'REOPEN_NOTE' || message.action === 'FOCUS_NOTE') {
-          const success = this.openOnlyNote(message.noteId);
-          sendResponse({ ok: success });
-        } else if (message.action === 'DELETE_NOTE') {
-          this.deleteNote(message.noteId);
-          sendResponse({ ok: true });
-        } else if (message.action === 'DELETE_ALL_NOTES') {
-          for (const id of Array.from(this.notesMap.keys())) {
-            this.deleteNote(id);
-          }
-          sendResponse({ ok: true });
-        } else if (message.action === 'TOGGLE_VISIBILITY') {
-          const visible = this.toggleVisibility();
-          sendResponse({ ok: true, isVisible: visible });
-        }
-        return true;
-      });
+          return true;
+        });
+      }
 
       window.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'CANVAS_CREATE_NOTE') {
@@ -1050,13 +1107,15 @@
         }
       });
 
-      chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName !== 'local') return;
-        if (changes[this.storageKey]) {
-          const newNotesData = changes[this.storageKey].newValue || [];
-          this.reconcileStorageChange(newNotesData);
-        }
-      });
+      if (isExtensionValid() && chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+          if (areaName !== 'local') return;
+          if (changes[this.storageKey]) {
+            const newNotesData = changes[this.storageKey].newValue || [];
+            this.reconcileStorageChange(newNotesData);
+          }
+        });
+      }
 
       window.addEventListener('resize', () => {
         for (const controller of this.controllers.values()) {
@@ -1064,8 +1123,12 @@
         }
       });
 
-      window.addEventListener('beforeunload', () => this.persistNow());
-      window.addEventListener('pagehide', () => this.persistNow());
+      window.addEventListener('beforeunload', () => {
+        if (isExtensionValid()) this.persistNow();
+      });
+      window.addEventListener('pagehide', () => {
+        if (isExtensionValid()) this.persistNow();
+      });
     }
 
     reconcileStorageChange(newList) {

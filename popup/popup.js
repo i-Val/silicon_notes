@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         await chrome.scripting.executeScript({
           target: { tabId: activeTab.id },
-          files: ['content/content.js']
+          files: ['content/fonts.js', 'content/content.js']
         });
         await new Promise(r => setTimeout(r, 120));
         return await chrome.tabs.sendMessage(activeTab.id, message);
@@ -287,7 +287,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!confirmed) return;
 
         allNotes = allNotes.filter(n => n.id !== note.id);
-        await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: allNotes });
+        try {
+          if (chrome?.storage?.local) {
+            await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: allNotes });
+          }
+        } catch (e) {}
 
         if (isWebPage) {
           sendMessageToContent({ action: 'DELETE_NOTE', noteId: note.id }).catch(() => {});
@@ -409,7 +413,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!confirmed) return;
 
     allNotes = [];
-    await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: [] });
+    try {
+      if (chrome?.storage?.local) {
+        await chrome.storage.local.set({ [GLOBAL_STORAGE_KEY]: [] });
+      }
+    } catch (e) {}
 
     if (isWebPage) {
       sendMessageToContent({ action: 'DELETE_ALL_NOTES' }).catch(() => {});
@@ -437,13 +445,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Real-time updates while popup is open
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local') return;
-    if (changes[GLOBAL_STORAGE_KEY]) {
-      allNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
-      renderNotes(getFilteredNotes());
+  try {
+    if (chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local') return;
+        if (changes[GLOBAL_STORAGE_KEY]) {
+          allNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
+          renderNotes(getFilteredNotes());
+        }
+      });
     }
-  });
+  } catch (e) {}
 
   loadGlobalNotes();
 });

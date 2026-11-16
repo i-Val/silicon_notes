@@ -35,7 +35,7 @@ async function sendMessageToTab(tabId, message) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['content/content.js']
+        files: ['content/fonts.js', 'content/content.js']
       });
       await new Promise(r => setTimeout(r, 120));
       return await chrome.tabs.sendMessage(tabId, message);
