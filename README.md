@@ -62,14 +62,4 @@ Built with modern ES2022+, Web Components / Shadow DOM CSS isolation, and zero t
 | **Italic** | `Ctrl + I` | `Cmd + I` |
 | **Underline** | `Ctrl + U` | `Cmd + U` |
 
----
 
-## 🚀 Installation & Testing
-
-1. Open Google Chrome and go to `chrome://extensions/`.
-2. Find **Rich Web Sticky Notes** and click the **Reload icon (🔄)**.
-3. Test Global Availability:
-   - Create a sticky note on any website (e.g. `wikipedia.org`).
-   - Navigate to another website (e.g. `google.com` or `localhost`) or open a new tab: your sticky notes are right there!
-   - Edit, drag, or close notes on any page: changes update in real time everywhere.
-   - Open the extension popup anywhere to view, search, export, or reopen notes.
