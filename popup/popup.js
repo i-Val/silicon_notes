@@ -1,9 +1,10 @@
 /**
- * Rich Web Sticky Notes - Popup Controller
+ * Silicon Notes - Popup Controller
  * Global Availability: Manages sticky notes available across all websites.
  */
 
-const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+const GLOBAL_STORAGE_KEY = 'silicon_notes_global';
+const LEGACY_STORAGE_KEY = 'rich_sticky_notes_global';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const pageUrlEl = document.getElementById('pageUrl');
@@ -129,7 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const allData = await chrome.storage.local.get(null);
       let globalList = Array.isArray(allData[GLOBAL_STORAGE_KEY]) ? allData[GLOBAL_STORAGE_KEY] : [];
 
-      const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== GLOBAL_STORAGE_KEY);
+      const legacyKeys = Object.keys(allData).filter(k => (k.startsWith('notes:') || k === LEGACY_STORAGE_KEY) && k !== GLOBAL_STORAGE_KEY);
       if (legacyKeys.length > 0) {
         const existingIds = new Set(globalList.map(n => n.id));
         let migrated = false;
@@ -371,7 +372,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    let md = `# Global Sticky Notes Export\n`;
+    let md = `# Silicon Notes Export\n`;
     md += `Exported: ${new Date().toLocaleString()}\n`;
     md += `Total Notes: ${allNotes.length}\n\n---\n\n`;
 
@@ -449,8 +450,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (chrome?.storage?.onChanged) {
       chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== 'local') return;
-        if (changes[GLOBAL_STORAGE_KEY]) {
-          allNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
+        const targetChange = changes[GLOBAL_STORAGE_KEY] || changes[LEGACY_STORAGE_KEY];
+        if (targetChange) {
+          allNotes = targetChange.newValue || [];
           renderNotes(getFilteredNotes());
         }
       });

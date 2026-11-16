@@ -1,14 +1,17 @@
 /**
- * Rich Web Sticky Notes - Background Service Worker (Manifest V3)
+ * Silicon Notes - Background Service Worker (Manifest V3)
  * Global Availability: Tracks notes globally across the browser.
  */
 
-const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+const GLOBAL_STORAGE_KEY = 'silicon_notes_global';
+const LEGACY_STORAGE_KEY = 'rich_sticky_notes_global';
 
 async function updateBadgeGlobal() {
   try {
-    const data = await chrome.storage.local.get(GLOBAL_STORAGE_KEY);
-    const notes = Array.isArray(data[GLOBAL_STORAGE_KEY]) ? data[GLOBAL_STORAGE_KEY] : [];
+    const data = await chrome.storage.local.get([GLOBAL_STORAGE_KEY, LEGACY_STORAGE_KEY]);
+    const notes = Array.isArray(data[GLOBAL_STORAGE_KEY])
+      ? data[GLOBAL_STORAGE_KEY]
+      : (Array.isArray(data[LEGACY_STORAGE_KEY]) ? data[LEGACY_STORAGE_KEY] : []);
     const activeCount = notes.filter(n => !n.closed).length;
 
     await chrome.action.setBadgeText({
@@ -86,8 +89,9 @@ chrome.tabs.onActivated.addListener(() => {
 // Real-time badge update on storage change
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
-  if (changes[GLOBAL_STORAGE_KEY]) {
-    const newNotes = changes[GLOBAL_STORAGE_KEY].newValue || [];
+  const targetChange = changes[GLOBAL_STORAGE_KEY] || changes[LEGACY_STORAGE_KEY];
+  if (targetChange) {
+    const newNotes = targetChange.newValue || [];
     const activeCount = Array.isArray(newNotes) ? newNotes.filter(n => !n.closed).length : 0;
     chrome.action.setBadgeText({
       text: activeCount > 0 ? String(activeCount) : ''

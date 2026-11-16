@@ -1,4 +1,4 @@
-# Rich Web Sticky Notes (Chrome Extension)
+# Silicon Notes (Chrome Extension)
 
 A lightweight Chrome Extension (Manifest V3) that lets you create, format, drag, resize, collapse, and persist rich text sticky notes **globally across every website, localhost, and blank canvas workspace**.
 

@@ -1,5 +1,5 @@
 /**
- * Rich Web Sticky Notes - Content Script
+ * Silicon Notes - Content Script
  * Manifest V3, Modern ES2022+, Shadow DOM Isolation, Zero External Dependencies
  * Global Availability: Notes persist globally across all websites, localhost, and canvas.
  */
@@ -15,13 +15,15 @@
   }
 
   // Guard against multiple injections
-  if (window.__RICH_WEB_STICKY_NOTES_INITIALIZED__) {
+  if (window.__SILICON_NOTES_INITIALIZED__ || window.__RICH_WEB_STICKY_NOTES_INITIALIZED__) {
     return;
   }
+  window.__SILICON_NOTES_INITIALIZED__ = true;
   window.__RICH_WEB_STICKY_NOTES_INITIALIZED__ = true;
 
   // --- Constants & Color Themes ---
-  const GLOBAL_STORAGE_KEY = 'rich_sticky_notes_global';
+  const GLOBAL_STORAGE_KEY = 'silicon_notes_global';
+  const LEGACY_STORAGE_KEY = 'rich_sticky_notes_global';
 
   // --- Safe Storage & Extension Context Validation ---
   function isExtensionValid() {
@@ -743,6 +745,7 @@
       this.saveDebounceTimer = null;
       this.isVisible = true;
 
+      window.__siliconNotesApp = this;
       window.__richStickyNotesApp = this;
 
       this.initHost();
@@ -751,29 +754,30 @@
     }
 
     initHost() {
-      const existing = document.getElementById('rich-web-sticky-notes-root');
+      const existing = document.getElementById('silicon-notes-root') || document.getElementById('rich-web-sticky-notes-root');
       if (existing) existing.remove();
 
       const host = document.createElement('div');
-      host.id = 'rich-web-sticky-notes-root';
+      host.id = 'silicon-notes-root';
       host.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; pointer-events: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; display: block !important; font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;';
 
       this.shadowRoot = host.attachShadow({ mode: 'open' });
 
       // Ensure global @font-face is in document head
-      if (typeof document !== 'undefined' && !document.getElementById('rich-web-sticky-notes-global-fonts')) {
+      if (typeof document !== 'undefined' && !document.getElementById('silicon-notes-global-fonts') && !document.getElementById('rich-web-sticky-notes-global-fonts')) {
         try {
           const globalStyle = document.createElement('style');
-          globalStyle.id = 'rich-web-sticky-notes-global-fonts';
-          if (window.__richStickyNotesFontCss) {
-            globalStyle.textContent = window.__richStickyNotesFontCss;
+          globalStyle.id = 'silicon-notes-global-fonts';
+          const fontCss = window.__siliconNotesFontCss || window.__richStickyNotesFontCss;
+          if (fontCss) {
+            globalStyle.textContent = fontCss;
           }
           (document.head || document.documentElement).appendChild(globalStyle);
         } catch (e) {}
       }
 
       const styleEl = document.createElement('style');
-      styleEl.textContent = (window.__richStickyNotesFontCss || '') + '\n' + SHADOW_STYLES;
+      styleEl.textContent = (window.__siliconNotesFontCss || window.__richStickyNotesFontCss || '') + '\n' + SHADOW_STYLES;
       this.shadowRoot.appendChild(styleEl);
 
       this.container = document.createElement('div');
@@ -797,7 +801,7 @@
         let globalList = Array.isArray(allData[this.storageKey]) ? allData[this.storageKey] : [];
 
         // Check legacy keys
-        const legacyKeys = Object.keys(allData).filter(k => k.startsWith('notes:') && k !== this.storageKey);
+        const legacyKeys = Object.keys(allData).filter(k => (k.startsWith('notes:') || k === LEGACY_STORAGE_KEY) && k !== this.storageKey);
         if (legacyKeys.length > 0) {
           const existingIds = new Set(globalList.map(n => n.id));
           let migrated = false;

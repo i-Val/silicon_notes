@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Rich Web Sticky Notes",
+  "name": "Silicon Notes",
   "version": "1.0.1",
-  "description": "Create, format, and persist beautiful rich text sticky notes directly on any webpage or blank canvas.",
+  "description": "Create, format, and persist beautiful rich text sticky notes directly on any webpage or blank canvas with Silicon Notes.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Rich Web Sticky Notes",
+    "default_title": "Silicon Notes",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

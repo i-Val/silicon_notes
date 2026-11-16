@@ -1,7 +1,7 @@
-# AI Coding Agent Specification: "Rich Web Sticky Notes" Chrome Extension
+# AI Coding Agent Specification: "Silicon Notes" Chrome Extension
 
 ## 1. Role & Objective
-Act as a Senior Chrome Extension Engineer specializing in Manifest V3, modern JavaScript (ES2022+), DOM isolation, and UI/UX engineering. Build a complete, production-ready Chrome Extension named **"Rich Web Sticky Notes"** that lets users create, edit, format, drag, resize, collapse, and persist sticky notes directly on any webpage.
+Act as a Senior Chrome Extension Engineer specializing in Manifest V3, modern JavaScript (ES2022+), DOM isolation, and UI/UX engineering. Build a complete, production-ready Chrome Extension named **"Silicon Notes"** that lets users create, edit, format, drag, resize, collapse, and persist sticky notes directly on any webpage.
 
 ---
 

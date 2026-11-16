@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sticky Notes Canvas - Rich Web Sticky Notes</title>
+  <title>Silicon Notes Canvas</title>
   <link rel="icon" type="image/png" href="../icons/icon32.png">
   <style>
     @font-face {
@@ -178,7 +178,7 @@
   <div class="canvas-bar">
     <div class="brand-section">
       <img src="../icons/icon32.png" alt="Logo" class="brand-icon">
-      <span class="brand-title">Notes Canvas</span>
+      <span class="brand-title">Silicon Notes</span>
     </div>
 
     <button class="btn btn-primary" id="btnCanvasNewNote">
@@ -223,7 +223,7 @@
     // Check if any notes exist to hide watermark hint
     function checkHint() {
       const hint = document.getElementById('canvasHint');
-      const root = document.getElementById('rich-web-sticky-notes-root');
+      const root = document.getElementById('silicon-notes-root') || document.getElementById('rich-web-sticky-notes-root');
       if (root && root.shadowRoot) {
         const notes = root.shadowRoot.querySelectorAll('.sticky-note');
         if (hint) {

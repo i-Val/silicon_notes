@@ -1,5 +1,5 @@
 /**
- * Rich Web Sticky Notes - Poppins Font Embedder
+ * Silicon Notes - Poppins Font Embedder
  * Embeds Poppins fonts directly into the document and CSS Font Loading API
  * Ensures custom fonts render reliably inside Shadow DOM on all webpages.
  */
@@ -56,9 +56,9 @@
   `;
 
   function injectGlobalFontFace() {
-    if (document.getElementById('rich-web-sticky-notes-global-fonts')) return;
+    if (document.getElementById('silicon-notes-global-fonts') || document.getElementById('rich-web-sticky-notes-global-fonts')) return;
     const style = document.createElement('style');
-    style.id = 'rich-web-sticky-notes-global-fonts';
+    style.id = 'silicon-notes-global-fonts';
     style.textContent = fontCss;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -86,5 +86,6 @@
     } catch (e) {}
   }
 
+  window.__siliconNotesFontCss = fontCss;
   window.__richStickyNotesFontCss = fontCss;
 })();
