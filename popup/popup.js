@@ -253,26 +253,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
 
-      // Click card to jump or reopen
+      // Click card to open ONLY this clicked note
       card.addEventListener('click', async (e) => {
         if (e.target.closest('.btn-card-delete')) return;
 
         if (!isWebPage) {
-          const canvasUrl = chrome.runtime.getURL('canvas/canvas.html');
+          const canvasUrl = chrome.runtime.getURL(`canvas/canvas.html?openNoteId=${encodeURIComponent(note.id)}`);
           await chrome.tabs.create({ url: canvasUrl });
           window.close();
           return;
         }
 
         try {
-          if (note.closed) {
-            await sendMessageToContent({ action: 'REOPEN_NOTE', noteId: note.id });
-          } else {
-            await sendMessageToContent({ action: 'FOCUS_NOTE', noteId: note.id });
-          }
+          await sendMessageToContent({ action: 'OPEN_ONLY_NOTE', noteId: note.id });
           window.close();
         } catch (err) {
-          console.debug('Focus note failed:', err);
+          console.debug('Open only note failed:', err);
         }
       });
 

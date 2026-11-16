@@ -672,6 +672,8 @@
       this.saveDebounceTimer = null;
       this.isVisible = true;
 
+      window.__richStickyNotesApp = this;
+
       this.initHost();
       this.loadNotesWithMigration();
       this.setupListeners();
@@ -747,6 +749,14 @@
           }
         }
 
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          const openParam = urlParams.get('openNoteId');
+          if (openParam && this.notesMap.has(openParam)) {
+            this.openOnlyNote(openParam);
+          }
+        } catch (e) {}
+
         this.notifyBadgeUpdate();
       } catch (err) {
         console.error('Error loading global sticky notes:', err);
@@ -801,22 +811,21 @@
       const data = this.notesMap.get(id);
       if (!data) return;
 
+      // Update data state
       data.closed = true;
       data.updatedAt = Date.now();
-      if (controller) {
-        const latest = controller.getData();
-        Object.assign(data, latest, { closed: true });
-      }
 
       if (controller) {
+        controller.data.closed = true;
         controller.element.style.transform = 'scale(0.85)';
         controller.element.style.opacity = '0';
+        // Immediately remove from active controllers map so persistNow cannot re-add with closed:false
+        this.controllers.delete(id);
         setTimeout(() => {
           controller.destroy();
           if (controller.element.parentNode) {
             controller.element.parentNode.removeChild(controller.element);
           }
-          this.controllers.delete(id);
         }, 180);
       }
 
@@ -824,45 +833,78 @@
       this.notifyBadgeUpdate();
     }
 
-    // Reopen closed note back onto the page and focus it
-    reopenNote(id) {
-      let data = this.notesMap.get(id);
+    // Opens ONLY the clicked note on the page; other notes stay closed or close smoothly
+    openOnlyNote(id) {
+      this.isVisible = true;
+      this.container.classList.remove('is-hidden');
+
+      // 1. Close/hide all other open controllers on this page
+      for (const [ctrlId, ctrl] of Array.from(this.controllers.entries())) {
+        if (ctrlId !== id) {
+          ctrl.data.closed = true;
+          const otherData = this.notesMap.get(ctrlId);
+          if (otherData) {
+            otherData.closed = true;
+            otherData.updatedAt = Date.now();
+          }
+          ctrl.destroy();
+          if (ctrl.element.parentNode) {
+            ctrl.element.parentNode.removeChild(ctrl.element);
+          }
+          this.controllers.delete(ctrlId);
+        }
+      }
+
+      // 2. Mark any other notes in notesMap as closed
+      for (const [noteId, noteData] of this.notesMap.entries()) {
+        if (noteId !== id) {
+          noteData.closed = true;
+        }
+      }
+
+      // 3. Open, position and focus the target note
+      const data = this.notesMap.get(id);
       if (!data) return false;
 
       data.closed = false;
       data.updatedAt = Date.now();
 
-      if (!this.isVisible) {
-        this.toggleVisibility();
-      }
-
-      let controller = this.controllers.get(id);
-      if (!controller) {
-        controller = new NoteController(this, data);
-        this.controllers.set(id, controller);
-        this.container.appendChild(controller.element);
+      let targetController = this.controllers.get(id);
+      if (!targetController) {
+        targetController = new NoteController(this, data);
+        this.controllers.set(id, targetController);
+        this.container.appendChild(targetController.element);
       } else {
-        controller.data.closed = false;
-        controller.element.style.display = 'flex';
-        controller.element.style.opacity = '1';
-        controller.element.style.transform = 'scale(1)';
+        targetController.data.closed = false;
+        targetController.element.style.display = 'flex';
+        targetController.element.style.opacity = '1';
+        targetController.element.style.transform = 'scale(1)';
       }
 
-      if (controller.data.collapsed) {
-        controller.toggleCollapse();
+      if (targetController.data.collapsed) {
+        targetController.toggleCollapse();
       }
 
-      this.bringToFront(controller);
-      controller.clampToViewport();
+      this.bringToFront(targetController);
+      targetController.clampToViewport();
 
-      controller.element.classList.remove('highlight-pulse');
-      void controller.element.offsetWidth;
-      controller.element.classList.add('highlight-pulse');
+      targetController.element.classList.remove('highlight-pulse');
+      void targetController.element.offsetWidth;
+      targetController.element.classList.add('highlight-pulse');
 
-      controller.focusHeading();
+      targetController.focusHeading();
       this.persistNow();
       this.notifyBadgeUpdate();
       return true;
+    }
+
+    // Alias for compatibility
+    reopenNote(id) {
+      return this.openOnlyNote(id);
+    }
+
+    focusNoteById(id) {
+      return this.openOnlyNote(id);
     }
 
     deleteNote(id) {
@@ -872,12 +914,12 @@
       if (controller) {
         controller.element.style.transform = 'scale(0.8)';
         controller.element.style.opacity = '0';
+        this.controllers.delete(id);
         setTimeout(() => {
           controller.destroy();
           if (controller.element.parentNode) {
             controller.element.parentNode.removeChild(controller.element);
           }
-          this.controllers.delete(id);
         }, 180);
       }
 
@@ -932,34 +974,6 @@
       return this.isVisible;
     }
 
-    focusNoteById(id) {
-      let data = this.notesMap.get(id);
-      if (!data) return false;
-
-      if (data.closed || !this.controllers.has(id)) {
-        return this.reopenNote(id);
-      }
-
-      if (!this.isVisible) {
-        this.toggleVisibility();
-      }
-
-      const controller = this.controllers.get(id);
-      if (controller.data.collapsed) {
-        controller.toggleCollapse();
-      }
-
-      this.bringToFront(controller);
-      controller.clampToViewport();
-
-      controller.element.classList.remove('highlight-pulse');
-      void controller.element.offsetWidth;
-      controller.element.classList.add('highlight-pulse');
-
-      controller.focusHeading();
-      return true;
-    }
-
     setupListeners() {
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'CREATE_NOTE') {
@@ -976,8 +990,8 @@
         } else if (message.action === 'CLOSE_NOTE') {
           this.closeNote(message.noteId);
           sendResponse({ ok: true });
-        } else if (message.action === 'REOPEN_NOTE') {
-          const success = this.reopenNote(message.noteId);
+        } else if (message.action === 'OPEN_ONLY_NOTE' || message.action === 'REOPEN_NOTE' || message.action === 'FOCUS_NOTE') {
+          const success = this.openOnlyNote(message.noteId);
           sendResponse({ ok: success });
         } else if (message.action === 'DELETE_NOTE') {
           this.deleteNote(message.noteId);
@@ -990,9 +1004,6 @@
         } else if (message.action === 'TOGGLE_VISIBILITY') {
           const visible = this.toggleVisibility();
           sendResponse({ ok: true, isVisible: visible });
-        } else if (message.action === 'FOCUS_NOTE') {
-          const success = this.focusNoteById(message.noteId);
-          sendResponse({ ok: success });
         }
         return true;
       });
@@ -1000,6 +1011,8 @@
       window.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'CANVAS_CREATE_NOTE') {
           this.createNote();
+        } else if (e.data && e.data.type === 'CANVAS_OPEN_ONLY_NOTE' && e.data.noteId) {
+          this.openOnlyNote(e.data.noteId);
         }
       });
 
@@ -1287,7 +1300,6 @@
         swatch.style.backgroundColor = theme.bg;
         swatch.title = theme.name;
 
-        // Both pointerdown and click handlers ensure theme changes reliably in Shadow DOM
         const onSelect = (e) => {
           e.stopPropagation();
           e.preventDefault();
@@ -1309,7 +1321,6 @@
 
       this.element.appendChild(this.palettePopover);
 
-      // Shadow DOM retargeting-safe outside click dismiss handler
       const dismissHandler = (e) => {
         const path = e.composedPath ? e.composedPath() : [];
         if (this.palettePopover && !path.includes(this.palettePopover) && !path.includes(paletteBtn)) {
@@ -1324,7 +1335,6 @@
       }, 50);
     }
 
-    // Styled In-Note Confirmation Dialog
     promptDeleteConfirm() {
       if (this.confirmOverlay) {
         this.confirmOverlay.remove();
@@ -1412,7 +1422,6 @@
         this.toggleCollapse();
       });
 
-      // Double clicking header expands or collapses note
       this.headerEl.addEventListener('dblclick', (e) => {
         if (e.target.closest('.btn-header') || e.target.closest('.palette-popover')) return;
         this.toggleCollapse();
@@ -1443,7 +1452,6 @@
         this.app.persistNow();
       });
 
-      // Clicking heading of a collapsed note expands it
       this.headingInput.addEventListener('focus', () => {
         if (this.data.collapsed) {
           this.toggleCollapse();

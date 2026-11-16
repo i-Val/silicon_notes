@@ -170,6 +170,15 @@
       window.postMessage({ type: 'CANVAS_CREATE_NOTE' }, '*');
     });
 
+    // Support opening a specific note directly on canvas from query param
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetNoteId = urlParams.get('openNoteId');
+    if (targetNoteId) {
+      setTimeout(() => {
+        window.postMessage({ type: 'CANVAS_OPEN_ONLY_NOTE', noteId: targetNoteId }, '*');
+      }, 150);
+    }
+
     // Check if any notes exist to hide watermark hint
     function checkHint() {
       const hint = document.getElementById('canvasHint');
